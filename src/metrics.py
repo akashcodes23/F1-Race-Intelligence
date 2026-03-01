@@ -270,3 +270,20 @@ def calculate_degradation(laps):
     intercept = model.intercept_
 
     return slope, intercept
+
+from sklearn.metrics import r2_score, mean_squared_error
+import numpy as np
+
+def evaluate_models(model, laps):
+    X = laps[["LapNumber"]]  # adjust if you use more features
+    y_true = laps["LapTime"].dt.total_seconds()
+
+    y_pred = model.predict(X)
+
+    r2 = r2_score(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+
+    return {
+        "r2": r2,
+        "rmse": rmse
+    }
