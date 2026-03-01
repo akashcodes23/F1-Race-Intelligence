@@ -1,11 +1,20 @@
-import sys
 import os
+import sys
+import fastf1
+
+# Enable FastF1 cache (important for Streamlit Cloud)
+if not os.path.exists("cache"):
+    os.makedirs("cache")
+
+fastf1.Cache.enable_cache("cache")
+
+# Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import fastf1
+
 import plotly.graph_objects as go
 
 from data_loader import load_race_data
