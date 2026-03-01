@@ -81,14 +81,14 @@ This makes the system extensible for advanced modeling modules.
 
 
 ## 📊 Technical Stack
-
+```
 •Python 3.10+
 •FastF1 (Official F1 Data API)
 •Pandas / NumPy (Data Engineering)
 •Scikit-learn (Statistical Modeling)
 •Plotly (Interactive Visualization)
 •Streamlit (Analytics Interface Layer)
-
+```
 ## ⚡ Performance Engineering
 
 	•	Cached session loading to reduce API overhead
@@ -166,6 +166,7 @@ This project demonstrates:
 ## 🛣 Roadmap: Phase II (Strategic Expansion)
 
 Planned extensions:
+	
 	•	Pit Strategy Simulation Engine
 	•	Lap Time Prediction Model (ML)
 	•	Driver Consistency Index
@@ -176,11 +177,10 @@ Planned extensions:
 
 The architecture already supports these extensions.
 
-⸻
-
 ## 🤝 Contributing
 
 We welcome contributions in:
+	
 	•	Advanced modeling (time-series ML)
 	•	Feature engineering optimization
 	•	Visualization enhancements
