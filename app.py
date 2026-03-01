@@ -47,6 +47,7 @@ run_analysis = st.sidebar.button("Run Analysis")
 def get_race(year, gp):
     return load_race_data(year, gp)
 
+
 # --------------------------------------
 # Main Execution
 # --------------------------------------
@@ -56,7 +57,7 @@ if run_analysis:
 
         laps = get_race(season, grand_prix)
 
-        if laps is None or laps.empty:
+        if laps is None or len(laps) == 0:
             st.error("No lap data found.")
             st.stop()
 
