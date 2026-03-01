@@ -13,12 +13,11 @@ if not os.path.exists(CACHE_DIR):
 fastf1.Cache.enable_cache(CACHE_DIR)
 
 
-def load_race_data(year, race, driver, session_type="R"):
+def load_race_data(year, race, session_type="R"):
     """
-    Load race laps for a specific driver.
+    Load full session laps.
     """
     session = fastf1.get_session(year, race, session_type)
     session.load()
 
-    laps = session.laps.pick_driver(driver)
-    return laps
+    return session.laps
