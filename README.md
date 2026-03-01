@@ -3,10 +3,11 @@
 [![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge&logo=python)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 
+![Screenshot 2026-03-01 at 7 50 04 PM](https://github.com/user-attachments/assets/7b74f2ec-62f2-4c55-8b68-38d06606bdcf)
 
 AI-Powered Motorsport Analytics & Strategic Performance Engine.Simulating real-world Formula 1 race engineering decision workflows using structured data analytics.
 
-![Screenshot 2026-03-01 at 7 50 04 PM](https://github.com/user-attachments/assets/7b74f2ec-62f2-4c55-8b68-38d06606bdcf)
+https://github.com/user-attachments/assets/ee20de16-98d4-466a-ba7b-0041e7992fb4
 
 >F1 Race Intelligence Platform is a modular, production-oriented motorsport analytics system that transforms raw Formula 1 race session data into actionable performance intelligence.
 Built on top of the FastF1 API and engineered using scalable data pipelines, this platform bridges sports analytics, machine learning foundations, and interactive decision-support visualization.
@@ -121,10 +122,6 @@ F1-Race-Intelligence
 ├── requirements.txt
 └── README.md
 ```
-
-##  Demo Video
-
-https://github.com/user-attachments/assets/ee20de16-98d4-466a-ba7b-0041e7992fb4
 
 
 ## 🔬 Analytical Methodology
