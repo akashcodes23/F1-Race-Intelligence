@@ -47,12 +47,7 @@ run_analysis = st.sidebar.button("Run Analysis")
 def get_race(year, gp):
     return load_race_data(year, gp)
 
-# --------------------------------------
-# Cached Model Trainer
-# --------------------------------------
-@st.cache_resource
-def train_model_cached(laps):
-    return train_lap_models(laps)
+model = train_model_cached(laps)
 
 # --------------------------------------
 # Main Execution
