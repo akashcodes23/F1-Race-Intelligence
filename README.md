@@ -1,6 +1,6 @@
 # 🏎️ F1 Race Intelligence Platform
 AI-Powered Motorsport Analytics & Strategic Performance Engine
-<img width="1470" height="956" alt="Screenshot 2026-03-01 at 7 50 04 PM" src="https://github.com/user-attachments/assets/1d67cc1a-6a06-4349-84f1-10a0bbc5724f" />
+![Screenshot 2026-03-01 at 7 50 04 PM](https://github.com/user-attachments/assets/7b74f2ec-62f2-4c55-8b68-38d06606bdcf)
 
 >F1 Race Intelligence Platform is a modular, production-oriented motorsport analytics system that transforms raw Formula 1 race session data into actionable performance intelligence.
 Built on top of the FastF1 API and engineered using scalable data pipelines, this platform bridges sports analytics, machine learning foundations, and interactive decision-support visualization.
