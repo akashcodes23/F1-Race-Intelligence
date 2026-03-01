@@ -6,7 +6,6 @@ F1 Race Intelligence Platform is a modular, production-oriented motorsport analy
 
 Built on top of the FastF1 API and engineered using scalable data pipelines, this platform bridges sports analytics, machine learning foundations, and interactive decision-support visualization.
 
-⸻
 
 ## 🎯 Executive Summary
 
@@ -21,7 +20,6 @@ This platform replicates that analytical framework by:
 It is not just a visualization tool.
 It is a race intelligence system.
 
-⸻
 
 ## 🧠 Core Capabilities
 
@@ -33,7 +31,6 @@ It is a race intelligence system.
 
 Enables micro-level pace analysis across the race lifecycle.
 
-⸻
 
 2️⃣ Tire Degradation Modeling System
 	•	Quantile-based outlier filtering (1%–99%)
@@ -43,7 +40,6 @@ Enables micro-level pace analysis across the race lifecycle.
 
 Quantifies tire performance decay and driver consistency under load.
 
-⸻
 
 3️⃣ Defensive Data Pipeline Architecture
 	•	FastF1 cache optimization
@@ -54,9 +50,8 @@ Quantifies tire performance decay and driver consistency under load.
 
 Ensures analytical integrity and production-level robustness.
 
-⸻
 
-##🏗 System Architecture
+## 🏗 System Architecture
 
 ```shell
 User Interface (Streamlit)
@@ -79,9 +74,9 @@ The architecture follows clean separation of concerns:
 
 This makes the system extensible for advanced modeling modules.
 
-⸻
 
-##📊 Technical Stack
+
+## 📊 Technical Stack
 
 •Python 3.10+
 •FastF1 (Official F1 Data API)
@@ -90,7 +85,7 @@ This makes the system extensible for advanced modeling modules.
 •Plotly (Interactive Visualization)
 •Streamlit (Analytics Interface Layer)
 
-##⚡ Performance Engineering
+## ⚡ Performance Engineering
 
 	•	Cached session loading to reduce API overhead
 	•	Vectorized data operations
@@ -100,7 +95,6 @@ This makes the system extensible for advanced modeling modules.
 
 This enables low-latency analytics even on full-race datasets (1000+ laps).
 
-⸻
 
 ## 📂 Project Structure
 
@@ -121,17 +115,20 @@ F1-Race-Intelligence
 ## 🔬 Analytical Methodology
 
 Lap Cleaning Strategy
+	
 	•	Convert timedelta → seconds
 	•	Drop missing lap times
 	•	Remove extreme outliers via quantile filtering
 	•	Enforce minimum lap threshold
 
 Degradation Metric
+	
 	•	Fit linear regression on LapNumber vs LapTimeSec
 	•	Extract slope coefficient
 	•	Interpret slope as tire decay rate
 
 Delta Computation
+	
 	•	Merge lap times by lap number
 	•	Compute lap delta
 	•	Compute cumulative delta
@@ -146,9 +143,10 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-##🚀 Why This Project Stands Out
+## 🚀 Why This Project Stands Out
 
 This project demonstrates:
+	
 	•	Applied sports analytics
 	•	Structured data engineering
 	•	Statistical modeling foundations
