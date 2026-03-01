@@ -123,6 +123,15 @@ F1-Race-Intelligence
 └── README.md
 ```
 
+## 🌐 Live Application
+
+Experience the platform in action:
+
+🔗 **Streamlit Deployment:**  
+https://f1-race-intelligence-qmzz4nuvmzql4hac6ajbbq.streamlit.app/
+
+> Fully functional production deployment with cached session loading and defensive input validation.
+
 
 ## 🔬 Analytical Methodology
 
@@ -165,6 +174,7 @@ This project demonstrates:
 	•	Interactive data storytelling
 	•	Clean modular architecture
 	•	Production-aware defensive programming
+	•   Live cloud deployment (Streamlit Cloud)
 
 ## 🛣 Roadmap: Phase II (Strategic Expansion)
 
