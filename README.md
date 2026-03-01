@@ -11,6 +11,7 @@ Built on top of the FastF1 API and engineered using scalable data pipelines, thi
 Modern Formula 1 strategy is driven by data — lap times, tire degradation, stint dynamics, pace evolution, and race momentum.
 
 This platform replicates that analytical framework by:
+	
 	•	Ingesting official F1 race session data
 	•	Cleaning and validating lap-level telemetry
 	•	Performing structured performance modeling
