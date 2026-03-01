@@ -1,0 +1,22 @@
+# Virtual environments
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# FastF1 cache
+cache/
+.cache/
+*.sqlite
+*.ff1pkl
+
+# OS files
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
