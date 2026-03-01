@@ -1,4 +1,7 @@
 # 🏎️ F1 Race Intelligence Platform
+[![Live Demo](https://img.shields.io/badge/Live-Demo-green?style=for-the-badge)](YOUR_STREAMLIT_LINK)
+[![Python](https://img.shields.io/badge/Python-3.10-blue?style=for-the-badge&logo=python)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 AI-Powered Motorsport Analytics & Strategic Performance Engine
 ![Screenshot 2026-03-01 at 7 50 04 PM](https://github.com/user-attachments/assets/7b74f2ec-62f2-4c55-8b68-38d06606bdcf)
 
