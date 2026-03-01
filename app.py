@@ -61,9 +61,7 @@ if run_analysis:
 
     with st.spinner("Loading race data & training models..."):
 
-        session = get_race(season, grand_prix)
-
-        laps = session.laps
+        laps = get_race(season, grand_prix)
 
         if laps.empty:
             st.error("No lap data found.")

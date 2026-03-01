@@ -20,4 +20,4 @@ def load_race_data(year, race, session_type="R"):
     session = fastf1.get_session(year, race, session_type)
     session.load()
 
-    return session.laps
+    return session

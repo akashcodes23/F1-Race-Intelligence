@@ -8,8 +8,8 @@ import numpy as np
 # =====================================================
 def compare_drivers_plot(laps, driver1, driver2):
 
-    laps1 = clean_laps(laps.pick_drivers(driver1))
-    laps2 = clean_laps(laps.pick_drivers(driver2))
+    laps1 = clean_laps(laps.pick_driver(driver1))
+    laps2 = clean_laps(laps.pick_driver(driver2))
 
     merged = laps1[['LapNumber', 'LapTimeSec']].merge(
         laps2[['LapNumber', 'LapTimeSec']],
