@@ -26,8 +26,11 @@ from metrics import clean_laps
 # Streamlit Config
 # --------------------------------------
 st.set_page_config(page_title="F1 Race Intelligence", layout="wide")
-st.title("🏎️ F1 Race Intelligence Platform")
-
+st.markdown("""
+# 🏎️ F1 Race Intelligence Platform  
+### AI-Driven Motorsport Analytics Dashboard
+""")
+st.divider()
 # --------------------------------------
 # Sidebar
 # --------------------------------------
@@ -39,7 +42,6 @@ driver1 = st.sidebar.text_input("Driver 1 (3-letter code)", "VER")
 driver2 = st.sidebar.text_input("Driver 2 (3-letter code)", "HAM")
 
 run_analysis = st.sidebar.button("Run Analysis")
-
 # --------------------------------------
 # Cached Race Loader
 # --------------------------------------
@@ -55,12 +57,27 @@ if run_analysis:
 
     with st.spinner("Loading race data..."):
 
+
         laps = get_race(season, grand_prix)
 
-        if laps is None or len(laps) == 0:
-            st.error("No lap data found.")
-            st.stop()
+    if laps is None or len(laps) == 0:
+        st.error("No lap data found.")
+        st.stop()
 
+    st.success("Data loaded successfully. Analysis ready.")
+
+    # --------------------------------------
+    # Defensive Driver Validation
+    # --------------------------------------
+    available_drivers = laps["Driver"].unique()
+
+    if driver1 not in available_drivers:
+        st.error(f"Driver {driver1} not found in this session.")
+        st.stop()
+
+    if driver2 not in available_drivers:
+        st.error(f"Driver {driver2} not found in this session.")
+        st.stop()
     # =====================================================
     # 🧠 Model Intelligence Overview
     # =====================================================
@@ -73,7 +90,7 @@ if run_analysis:
 
     with col2:
         st.metric("Drivers in Session", laps["Driver"].nunique())
-
+    st.divider()
     # =====================================================
     # 📊 Driver Delta Pace
     # =====================================================
@@ -81,7 +98,7 @@ if run_analysis:
 
     fig_delta = compare_drivers_plot(laps, driver1, driver2)
     st.plotly_chart(fig_delta, use_container_width=True)
-
+    st.divider()
     # =====================================================
     # 📉 Tire Degradation
     # =====================================================
@@ -102,3 +119,5 @@ if run_analysis:
 
 else:
     st.info("Configure parameters and click 'Run Analysis' to begin.")
+
+st.divider()
