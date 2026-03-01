@@ -4,7 +4,8 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 
 
-AI-Powered Motorsport Analytics & Strategic Performance Engine
+AI-Powered Motorsport Analytics & Strategic Performance Engine.Simulating real-world Formula 1 race engineering decision workflows using structured data analytics.
+
 ![Screenshot 2026-03-01 at 7 50 04 PM](https://github.com/user-attachments/assets/7b74f2ec-62f2-4c55-8b68-38d06606bdcf)
 
 >F1 Race Intelligence Platform is a modular, production-oriented motorsport analytics system that transforms raw Formula 1 race session data into actionable performance intelligence.
