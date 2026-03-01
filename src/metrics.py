@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import logging
+import numpy as np
+from sklearn.metrics import r2_score, mean_squared_error
 
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
@@ -270,9 +272,6 @@ def calculate_degradation(laps):
     intercept = model.intercept_
 
     return slope, intercept
-
-from sklearn.metrics import r2_score, mean_squared_error
-import numpy as np
 
 def evaluate_models(model, laps):
     X = laps[["LapNumber"]]  # adjust if you use more features

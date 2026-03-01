@@ -1,13 +1,12 @@
+
 import os
 import sys
 import streamlit as st
 import fastf1
-import pandas as pd
-import numpy as np
 
-# --------------------------------
-# Enable FastF1 Disk Cache
-# --------------------------------
+# --------------------------------------
+# Enable FastF1 Cache
+# --------------------------------------
 CACHE_DIR = "cache"
 
 if not os.path.exists(CACHE_DIR):
@@ -15,132 +14,105 @@ if not os.path.exists(CACHE_DIR):
 
 fastf1.Cache.enable_cache(CACHE_DIR)
 
-# --------------------------------
+# --------------------------------------
 # Add src to path
-# --------------------------------
+# --------------------------------------
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from data_loader import load_race_data
-from metrics import train_lap_models, evaluate_models
-from visualization import (
-    plot_driver_delta,
-    plot_tire_degradation,
-    plot_strategy_projection,
-    plot_pit_sensitivity
-)
+from metrics import train_lap_models
+from visualization import compare_drivers_plot, degradation_curve
 
-# --------------------------------
-# Streamlit Page Config
-# --------------------------------
-st.set_page_config(
-    page_title="F1 Race Intelligence",
-    layout="wide"
-)
-
+# --------------------------------------
+# Streamlit Config
+# --------------------------------------
+st.set_page_config(page_title="F1 Race Intelligence", layout="wide")
 st.title("🏎️ F1 Race Intelligence Platform")
 
-# --------------------------------
-# Sidebar Controls
-# --------------------------------
+# --------------------------------------
+# Sidebar
+# --------------------------------------
 st.sidebar.header("Race Configuration")
 
 season = st.sidebar.selectbox("Season", [2022, 2023])
-grand_prix = st.sidebar.text_input("Grand Prix Name", "Monaco")
+grand_prix = st.sidebar.text_input("Grand Prix", "Monaco")
 driver1 = st.sidebar.text_input("Driver 1", "VER")
 driver2 = st.sidebar.text_input("Driver 2", "HAM")
 
 run_analysis = st.sidebar.button("Run Analysis")
 
-# --------------------------------
-# Cached Session Loader
-# --------------------------------
+# --------------------------------------
+# Cached Race Loader
+# --------------------------------------
 @st.cache_data(show_spinner=False)
-def get_session(year, gp):
-    session = fastf1.get_session(year, gp, "R")
-    session.load()
-    return session
+def get_race(year, gp):
+    return load_race_data(year, gp)
 
-# --------------------------------
-# Cached Driver Laps
-# --------------------------------
-@st.cache_data(show_spinner=False)
-def get_driver_laps(year, gp, driver):
-    session = get_session(year, gp)
-    laps = session.laps.pick_driver(driver)
-    return laps
-
-# --------------------------------
-# Cached Model Training
-# --------------------------------
+# --------------------------------------
+# Cached Model Trainer
+# --------------------------------------
 @st.cache_resource
-def train_models_cached(laps):
+def train_model_cached(laps):
     return train_lap_models(laps)
 
-# --------------------------------
-# Main Execution Block
-# --------------------------------
+# --------------------------------------
+# Main Execution
+# --------------------------------------
 if run_analysis:
 
-    with st.spinner("Loading telemetry & training models..."):
+    with st.spinner("Loading race data & training models..."):
 
-        # Load driver data
-        laps1 = get_driver_laps(season, grand_prix, driver1)
-        laps2 = get_driver_laps(season, grand_prix, driver2)
+        session = get_race(season, grand_prix)
 
-        if laps1.empty or laps2.empty:
-            st.error("No lap data found. Check driver names or race.")
+        laps = session.laps
+
+        if laps.empty:
+            st.error("No lap data found.")
             st.stop()
 
-        # Train models
-        model1 = train_models_cached(laps1)
-        model2 = train_models_cached(laps2)
+        # Train model once
+        model = train_model_cached(laps)
 
-        # Evaluate
-        metrics1 = evaluate_models(model1, laps1)
-        metrics2 = evaluate_models(model2, laps2)
-
-    # --------------------------------
+    # =====================================================
     # 🧠 Model Intelligence Overview
-    # --------------------------------
+    # =====================================================
     st.markdown("## 🧠 Model Intelligence Overview")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.metric("Driver 1 R²", round(metrics1["r2"], 3))
-        st.metric("Driver 1 RMSE", round(metrics1["rmse"], 3))
+        st.metric("Total Laps", len(laps))
 
     with col2:
-        st.metric("Driver 2 R²", round(metrics2["r2"], 3))
-        st.metric("Driver 2 RMSE", round(metrics2["rmse"], 3))
+        st.metric("Drivers in Session", laps["Driver"].nunique())
 
-    # --------------------------------
+    # =====================================================
     # 📊 Driver Delta Pace
-    # --------------------------------
+    # =====================================================
     st.markdown("## 📊 Driver Delta Pace")
-    fig_delta = plot_driver_delta(laps1, laps2)
+
+    fig_delta = compare_drivers_plot(laps, driver1, driver2)
     st.plotly_chart(fig_delta, use_container_width=True)
 
-    # --------------------------------
+    # =====================================================
     # 📉 Tire Degradation
-    # --------------------------------
+    # =====================================================
     st.markdown("## 📉 Tire Degradation")
-    fig_tire = plot_tire_degradation(laps1, laps2)
-    st.plotly_chart(fig_tire, use_container_width=True)
 
-    # --------------------------------
-    # 🏁 Strategy Projection
-    # --------------------------------
-    st.markdown("## 🏁 Strategy Projection")
-    fig_strategy = plot_strategy_projection(model1, model2)
-    st.plotly_chart(fig_strategy, use_container_width=True)
+    from metrics import clean_laps
 
-    # --------------------------------
-    # 📈 Pit Sensitivity Curve
-    # --------------------------------
-    st.markdown("## 📈 Pit Sensitivity Curve")
-    fig_pit = plot_pit_sensitivity(model1, model2)
-    st.plotly_chart(fig_pit, use_container_width=True)
+    laps1_clean = clean_laps(laps.pick_drivers(driver1))
+    laps2_clean = clean_laps(laps.pick_drivers(driver2))
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig_deg1 = degradation_curve(laps1_clean, driver1)
+        st.plotly_chart(fig_deg1, use_container_width=True)
+
+    with col2:
+        fig_deg2 = degradation_curve(laps2_clean, driver2)
+        st.plotly_chart(fig_deg2, use_container_width=True)
 
 else:
-    st.info("Configure race parameters and click 'Run Analysis' to begin.")
+    st.info("Configure parameters and click 'Run Analysis' to begin.")
