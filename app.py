@@ -1,113 +1,117 @@
+import os
+import sys
 import streamlit as st
-import pandas as pd
+import fastf1
+
+# --------------------------------------
+# Enable FastF1 Cache
+# --------------------------------------
+CACHE_DIR = "cache"
+
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+
+fastf1.Cache.enable_cache(CACHE_DIR)
+
+# --------------------------------------
+# Add src to path
+# --------------------------------------
+sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from data_loader import load_race_data
-from visualization import (
-    compare_drivers_plot,
-    degradation_curve
-)
+from metrics import train_lap_models
+from visualization import compare_drivers_plot, degradation_curve
 
-# =====================================================
-# PAGE CONFIG
-# =====================================================
-
-st.set_page_config(
-    page_title="F1 Race Intelligence",
-    page_icon="🏎️",
-    layout="wide"
-)
-
+# --------------------------------------
+# Streamlit Config
+# --------------------------------------
+st.set_page_config(page_title="F1 Race Intelligence", layout="wide")
 st.title("🏎️ F1 Race Intelligence Platform")
 
-# =====================================================
-# CACHED DATA LOADER
-# =====================================================
-
-@st.cache_data(show_spinner=False)
-def get_session_laps(year, grand_prix, session_type):
-    return load_race_data(year, grand_prix, session_type)
-
-# =====================================================
-# SIDEBAR CONFIGURATION
-# =====================================================
-
+# --------------------------------------
+# Sidebar
+# --------------------------------------
 st.sidebar.header("Race Configuration")
 
-season = st.sidebar.selectbox(
-    "Season",
-    [2021, 2022, 2023, 2024]
-)
-
-grand_prix = st.sidebar.text_input(
-    "Grand Prix",
-    "Monaco"
-)
-
-session_type = st.sidebar.selectbox(
-    "Session Type",
-    ["R", "Q", "FP1", "FP2", "FP3"]
-)
-
-driver1 = st.sidebar.text_input("Driver 1 (3-letter code)", "VER")
-driver2 = st.sidebar.text_input("Driver 2 (3-letter code)", "HAM")
+season = st.sidebar.selectbox("Season", [2022, 2023])
+grand_prix = st.sidebar.text_input("Grand Prix", "Monaco")
+driver1 = st.sidebar.text_input("Driver 1", "VER")
+driver2 = st.sidebar.text_input("Driver 2", "HAM")
 
 run_analysis = st.sidebar.button("Run Analysis")
 
-# =====================================================
-# MAIN EXECUTION
-# =====================================================
+# --------------------------------------
+# Cached Race Loader
+# --------------------------------------
+@st.cache_data(show_spinner=False)
+def get_race(year, gp):
+    return load_race_data(year, gp)
 
+# --------------------------------------
+# Cached Model Trainer
+# --------------------------------------
+@st.cache_resource
+def train_model_cached(laps):
+    return train_lap_models(laps)
+
+# --------------------------------------
+# Main Execution
+# --------------------------------------
 if run_analysis:
 
-    with st.spinner("Loading race data..."):
-        laps = get_session_laps(season, grand_prix, session_type)
+    with st.spinner("Loading race data & training models..."):
 
-    if laps.empty:
-        st.error("No lap data found. Please check inputs.")
-        st.stop()
+        session = get_race(season, grand_prix)
 
-    st.success("Data Loaded Successfully")
+        laps = session.laps
 
-    # =====================================================
-    # DRIVER COMPARISON
-    # =====================================================
+        if laps.empty:
+            st.error("No lap data found.")
+            st.stop()
 
-    st.markdown("## 📊 Driver Delta Comparison")
-
-    try:
-        fig_delta = compare_drivers_plot(laps, driver1, driver2)
-        st.plotly_chart(fig_delta, use_container_width=True)
-    except Exception as e:
-        st.error(f"Driver comparison failed: {e}")
+        # Train model once
+        model = train_model_cached(laps)
 
     # =====================================================
-    # TIRE DEGRADATION
+    # 🧠 Model Intelligence Overview
     # =====================================================
+    st.markdown("## 🧠 Model Intelligence Overview")
 
-    st.markdown("## 📉 Tire Degradation Analysis")
+    col1, col2 = st.columns(2)
 
-    try:
-        driver1_laps = laps.pick_driver(driver1)
-        driver2_laps = laps.pick_driver(driver2)
+    with col1:
+        st.metric("Total Laps", len(laps))
 
-        col1, col2 = st.columns(2)
+    with col2:
+        st.metric("Drivers in Session", laps["Driver"].nunique())
 
-        with col1:
-            st.subheader(f"{driver1} Degradation")
-            fig_deg1 = degradation_curve(driver1_laps, driver1)
-            st.plotly_chart(fig_deg1, use_container_width=True)
+    # =====================================================
+    # 📊 Driver Delta Pace
+    # =====================================================
+    st.markdown("## 📊 Driver Delta Pace")
 
-        with col2:
-            st.subheader(f"{driver2} Degradation")
-            fig_deg2 = degradation_curve(driver2_laps, driver2)
-            st.plotly_chart(fig_deg2, use_container_width=True)
+    fig_delta = compare_drivers_plot(laps, driver1, driver2)
+    st.plotly_chart(fig_delta, use_container_width=True)
 
-    except Exception as e:
-        st.error(f"Degradation analysis failed: {e}")
+    # =====================================================
+    # 📉 Tire Degradation
+    # =====================================================
+    st.markdown("## 📉 Tire Degradation")
 
-# =====================================================
-# FOOTER
-# =====================================================
+    from metrics import clean_laps
 
-st.markdown("---")
-st.caption("Built with FastF1 + Streamlit | AI Motorsport Intelligence")
+    laps1_clean = clean_laps(laps.pick_drivers(driver1))
+    laps2_clean = clean_laps(laps.pick_drivers(driver2))
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        fig_deg1 = degradation_curve(laps1_clean, driver1)
+        st.plotly_chart(fig_deg1, use_container_width=True)
+
+    with col2:
+        fig_deg2 = degradation_curve(laps2_clean, driver2)
+        st.plotly_chart(fig_deg2, use_container_width=True)
+
+else:
+    st.info("Configure parameters and click 'Run Analysis' to begin.")
