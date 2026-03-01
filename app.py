@@ -19,8 +19,8 @@ fastf1.Cache.enable_cache(CACHE_DIR)
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from data_loader import load_race_data
-from metrics import train_lap_models
 from visualization import compare_drivers_plot, degradation_curve
+from metrics import clean_laps
 
 # --------------------------------------
 # Streamlit Config
@@ -35,8 +35,8 @@ st.sidebar.header("Race Configuration")
 
 season = st.sidebar.selectbox("Season", [2022, 2023])
 grand_prix = st.sidebar.text_input("Grand Prix", "Monaco")
-driver1 = st.sidebar.text_input("Driver 1", "VER")
-driver2 = st.sidebar.text_input("Driver 2", "HAM")
+driver1 = st.sidebar.text_input("Driver 1 (3-letter code)", "VER")
+driver2 = st.sidebar.text_input("Driver 2 (3-letter code)", "HAM")
 
 run_analysis = st.sidebar.button("Run Analysis")
 
@@ -52,16 +52,14 @@ def get_race(year, gp):
 # --------------------------------------
 if run_analysis:
 
-    with st.spinner("Loading race data & training models..."):
+    with st.spinner("Loading race data..."):
 
         laps = get_race(season, grand_prix)
 
-        if laps.empty:
+        if laps is None or laps.empty:
             st.error("No lap data found.")
             st.stop()
 
-        # Train model once
-        model = train_lap_models(laps)
     # =====================================================
     # 🧠 Model Intelligence Overview
     # =====================================================
@@ -88,10 +86,8 @@ if run_analysis:
     # =====================================================
     st.markdown("## 📉 Tire Degradation")
 
-    from metrics import clean_laps
-
-    laps1_clean = clean_laps(laps.pick_drivers(driver1))
-    laps2_clean = clean_laps(laps.pick_drivers(driver2))
+    laps1_clean = clean_laps(laps.pick_driver(driver1))
+    laps2_clean = clean_laps(laps.pick_driver(driver2))
 
     col1, col2 = st.columns(2)
 
