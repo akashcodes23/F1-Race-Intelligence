@@ -1,325 +1,146 @@
 import os
 import sys
-import fastf1
-
-# Enable FastF1 cache (important for Streamlit Cloud)
-if not os.path.exists("cache"):
-    os.makedirs("cache")
-
-fastf1.Cache.enable_cache("cache")
-
-# Add src to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
-
 import streamlit as st
+import fastf1
 import pandas as pd
 import numpy as np
 
-import plotly.graph_objects as go
+# --------------------------------
+# Enable FastF1 Disk Cache
+# --------------------------------
+CACHE_DIR = "cache"
+
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+
+fastf1.Cache.enable_cache(CACHE_DIR)
+
+# --------------------------------
+# Add src to path
+# --------------------------------
+sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 from data_loader import load_race_data
-from metrics import (
-    train_lap_models,
-    optimize_pit_window
+from metrics import train_lap_models, evaluate_models
+from visualization import (
+    plot_driver_delta,
+    plot_tire_degradation,
+    plot_strategy_projection,
+    plot_pit_sensitivity
 )
 
-# =====================================================
-# PAGE CONFIG
-# =====================================================
-
-st.set_page_config(page_title="F1 Race Intelligence", layout="wide")
+# --------------------------------
+# Streamlit Page Config
+# --------------------------------
+st.set_page_config(
+    page_title="F1 Race Intelligence",
+    layout="wide"
+)
 
 st.title("🏎️ F1 Race Intelligence Platform")
-st.caption("Predictive Modeling · Strategy Optimization · Race Intelligence")
 
-# =====================================================
-# CLEAN SECTION COMPONENT
-# =====================================================
+# --------------------------------
+# Sidebar Controls
+# --------------------------------
+st.sidebar.header("Race Configuration")
 
-def comparison_section(title: str, emoji: str):
-    st.markdown(
-        f"""
-        <div style="margin-top:50px; margin-bottom:25px;">
-            <h2 style="
-                border-bottom: 2px solid #2E2E2E;
-                padding-bottom: 10px;
-                font-weight: 600;">
-                {emoji} {title}
-            </h2>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+season = st.sidebar.selectbox("Season", [2022, 2023])
+grand_prix = st.sidebar.text_input("Grand Prix Name", "Monaco")
+driver1 = st.sidebar.text_input("Driver 1", "VER")
+driver2 = st.sidebar.text_input("Driver 2", "HAM")
 
-# =====================================================
-# CACHED LOADERS
-# =====================================================
+run_analysis = st.sidebar.button("Run Analysis")
 
+# --------------------------------
+# Cached Session Loader
+# --------------------------------
 @st.cache_data(show_spinner=False)
-def get_schedule(year):
-    schedule = fastf1.get_event_schedule(year)
-    return schedule["EventName"].tolist()
-
-@st.cache_data(show_spinner=False)
-def get_drivers(year, race):
-    session = fastf1.get_session(year, race, "R")
+def get_session(year, gp):
+    session = fastf1.get_session(year, gp, "R")
     session.load()
-    return sorted(session.drivers)
-
-# =====================================================
-# SIDEBAR
-# =====================================================
-
-st.sidebar.header("🎛 Control Panel")
-
-season = st.sidebar.selectbox("Season", [2021, 2022, 2023])
-gp_list = get_schedule(season)
-grand_prix = st.sidebar.selectbox("Grand Prix", gp_list)
-
-pit_penalty = st.sidebar.slider("Pit Stop Loss (sec)", 15, 35, 22)
-
-driver_list = get_drivers(season, grand_prix)
-drivers = st.sidebar.multiselect("Select exactly 2 drivers", driver_list)
-
-if len(drivers) != 2:
-    st.warning("Select exactly 2 drivers.")
-    st.stop()
-
-driver1, driver2 = drivers
-
-# =====================================================
-# LOAD DATA
-# =====================================================
-
-laps1 = load_race_data(season, grand_prix, driver1)
-laps2 = load_race_data(season, grand_prix, driver2)
-
-if len(laps1) < 15 or len(laps2) < 15:
-    st.error("Not enough lap data for reliable modeling.")
-    st.stop()
-
-# =====================================================
-# TRAIN MODELS
-# =====================================================
-
-with st.spinner("Training predictive models..."):
-    models1 = train_lap_models(laps1)
-    models2 = train_lap_models(laps2)
-
-rf1 = models1["random_forest"]
-rf2 = models2["random_forest"]
-
-# =====================================================
-# 🧠 MODEL INTELLIGENCE
-# =====================================================
-
-comparison_section("Model Intelligence Overview", "🧠")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader(driver1)
-    st.metric("R²", f"{rf1['test_r2']:.3f}")
-    st.metric("RMSE", f"{rf1['test_rmse']:.3f}")
-
-with col2:
-    st.subheader(driver2)
-    st.metric("R²", f"{rf2['test_r2']:.3f}")
-    st.metric("RMSE", f"{rf2['test_rmse']:.3f}")
-
-# =====================================================
-# 📊 DRIVER DELTA PACE
-# =====================================================
-
-comparison_section("Driver Delta Pace", "📊")
-
-def plot_driver_delta(l1, l2):
-
-    df1 = l1.copy()
-    df2 = l2.copy()
-
-    df1["LapTimeSec"] = df1["LapTime"].dt.total_seconds()
-    df2["LapTimeSec"] = df2["LapTime"].dt.total_seconds()
-
-    merged = pd.merge(
-        df1[["LapNumber", "LapTimeSec"]],
-        df2[["LapNumber", "LapTimeSec"]],
-        on="LapNumber",
-        suffixes=(f"_{driver1}", f"_{driver2}")
-    )
-
-    merged["Delta"] = (
-        merged[f"LapTimeSec_{driver1}"]
-        - merged[f"LapTimeSec_{driver2}"]
-    )
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=merged["LapNumber"],
-        y=merged["Delta"],
-        mode="lines",
-        name="Delta"
-    ))
-
-    fig.add_hline(y=0, line_dash="dash")
-
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis_title="Lap",
-        yaxis_title="Delta (sec)"
-    )
-
-    return fig
-
-st.plotly_chart(plot_driver_delta(laps1, laps2), width="stretch")
-
-# =====================================================
-# 📉 TIRE DEGRADATION
-# =====================================================
-
-comparison_section("Tire Degradation", "📉")
-
-def plot_degradation(laps, driver):
-
-    df = laps.copy()
-    df["LapTimeSec"] = df["LapTime"].dt.total_seconds()
-    df = df.dropna(subset=["LapNumber", "LapTimeSec"])
-
-    if len(df) < 5:
-        st.warning(f"Not enough clean data for {driver}")
-        return go.Figure()
-
-    x = df["LapNumber"].values
-    y = df["LapTimeSec"].values
-
-    slope, intercept = np.polyfit(x, y, 1)
-    trend = intercept + slope * x
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=y,
-        mode="markers",
-        name="Lap Time"
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=trend,
-        mode="lines",
-        name="Trend"
-    ))
-
-    fig.update_layout(
-        template="plotly_dark",
-        title=f"{driver} Degradation: {slope:.4f} sec/lap",
-        xaxis_title="Lap",
-        yaxis_title="Lap Time (sec)"
-    )
-
-    return fig
-
-c1, c2 = st.columns(2)
-c1.plotly_chart(plot_degradation(laps1, driver1), width="stretch")
-c2.plotly_chart(plot_degradation(laps2, driver2), width="stretch")
-
-# =====================================================
-# 🏁 STRATEGY PROJECTION (SAFE FEATURE MATCH)
-# =====================================================
-
-comparison_section("Strategy Projection", "🏁")
-
-def plot_projection(model, laps_df, future=10):
-
-    current_lap = int(laps_df["LapNumber"].max())
-    tire_age = 5
-
-    feature_order = model.feature_names_in_
-
-    cumulative = 0
-    laps = []
-    preds = []
-
-    for i in range(1, future + 1):
-
-        X = pd.DataFrame({
-            col: 0 for col in feature_order
-        }, index=[0])
-
-        if "LapNumber" in feature_order:
-            X["LapNumber"] = current_lap + i
-        if "TireAge" in feature_order:
-            X["TireAge"] = tire_age + i
-
-        pred = model.predict(X)[0]
-        cumulative += pred
-
-        laps.append(current_lap + i)
-        preds.append(cumulative)
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=laps,
-        y=preds,
-        mode="lines",
-        name="Projection"
-    ))
-
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis_title="Lap",
-        yaxis_title="Cumulative Time"
-    )
-
-    return fig
-
-st.plotly_chart(
-    plot_projection(rf1["model"], laps1),
-    width="stretch"
-)
-
-# =====================================================
-# 📈 PIT SENSITIVITY CURVE
-# =====================================================
-
-comparison_section("Pit Sensitivity Curve", "📈")
-
-def plot_pit_sensitivity(model, laps_df):
-
-    current_lap = int(laps_df["LapNumber"].max())
-    penalties = list(range(18, 31))
-    optimal_laps = []
-
-    for p in penalties:
-        best_lap, _ = optimize_pit_window(
-            model,
-            current_lap,
-            current_lap + 20,
-            5,
-            pit_penalty=p
-        )
-        optimal_laps.append(best_lap)
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=penalties,
-        y=optimal_laps,
-        mode="lines+markers"
-    ))
-
-    fig.update_layout(
-        template="plotly_dark",
-        xaxis_title="Pit Loss (sec)",
-        yaxis_title="Optimal Pit Lap"
-    )
-
-    return fig
-
-st.plotly_chart(
-    plot_pit_sensitivity(rf1["model"], laps1),
-    width="stretch"
-)
+    return session
+
+# --------------------------------
+# Cached Driver Laps
+# --------------------------------
+@st.cache_data(show_spinner=False)
+def get_driver_laps(year, gp, driver):
+    session = get_session(year, gp)
+    laps = session.laps.pick_driver(driver)
+    return laps
+
+# --------------------------------
+# Cached Model Training
+# --------------------------------
+@st.cache_resource
+def train_models_cached(laps):
+    return train_lap_models(laps)
+
+# --------------------------------
+# Main Execution Block
+# --------------------------------
+if run_analysis:
+
+    with st.spinner("Loading telemetry & training models..."):
+
+        # Load driver data
+        laps1 = get_driver_laps(season, grand_prix, driver1)
+        laps2 = get_driver_laps(season, grand_prix, driver2)
+
+        if laps1.empty or laps2.empty:
+            st.error("No lap data found. Check driver names or race.")
+            st.stop()
+
+        # Train models
+        model1 = train_models_cached(laps1)
+        model2 = train_models_cached(laps2)
+
+        # Evaluate
+        metrics1 = evaluate_models(model1, laps1)
+        metrics2 = evaluate_models(model2, laps2)
+
+    # --------------------------------
+    # 🧠 Model Intelligence Overview
+    # --------------------------------
+    st.markdown("## 🧠 Model Intelligence Overview")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Driver 1 R²", round(metrics1["r2"], 3))
+        st.metric("Driver 1 RMSE", round(metrics1["rmse"], 3))
+
+    with col2:
+        st.metric("Driver 2 R²", round(metrics2["r2"], 3))
+        st.metric("Driver 2 RMSE", round(metrics2["rmse"], 3))
+
+    # --------------------------------
+    # 📊 Driver Delta Pace
+    # --------------------------------
+    st.markdown("## 📊 Driver Delta Pace")
+    fig_delta = plot_driver_delta(laps1, laps2)
+    st.plotly_chart(fig_delta, use_container_width=True)
+
+    # --------------------------------
+    # 📉 Tire Degradation
+    # --------------------------------
+    st.markdown("## 📉 Tire Degradation")
+    fig_tire = plot_tire_degradation(laps1, laps2)
+    st.plotly_chart(fig_tire, use_container_width=True)
+
+    # --------------------------------
+    # 🏁 Strategy Projection
+    # --------------------------------
+    st.markdown("## 🏁 Strategy Projection")
+    fig_strategy = plot_strategy_projection(model1, model2)
+    st.plotly_chart(fig_strategy, use_container_width=True)
+
+    # --------------------------------
+    # 📈 Pit Sensitivity Curve
+    # --------------------------------
+    st.markdown("## 📈 Pit Sensitivity Curve")
+    fig_pit = plot_pit_sensitivity(model1, model2)
+    st.plotly_chart(fig_pit, use_container_width=True)
+
+else:
+    st.info("Configure race parameters and click 'Run Analysis' to begin.")
