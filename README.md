@@ -24,6 +24,7 @@ It is a race intelligence system.
 ## 🧠 Core Capabilities
 
 1️⃣ Driver Delta Intelligence Engine
+	
 	•	Lap-by-lap time delta modeling
 	•	Cumulative advantage tracking
 	•	Zero-baseline race momentum visualization
@@ -33,6 +34,7 @@ Enables micro-level pace analysis across the race lifecycle.
 
 
 2️⃣ Tire Degradation Modeling System
+	
 	•	Quantile-based outlier filtering (1%–99%)
 	•	LapTime normalization to seconds
 	•	Linear regression slope extraction
@@ -42,6 +44,7 @@ Quantifies tire performance decay and driver consistency under load.
 
 
 3️⃣ Defensive Data Pipeline Architecture
+	
 	•	FastF1 cache optimization
 	•	Null-safe session loading
 	•	Minimum lap threshold enforcement
@@ -67,6 +70,7 @@ Analytics Core (Delta + Degradation Modeling)
 Interactive Plotly Intelligence Dashboard
 ```
 The architecture follows clean separation of concerns:
+
 	•	Data Layer
 	•	Analytics Layer
 	•	Visualization Layer
@@ -111,6 +115,11 @@ F1-Race-Intelligence
 ├── requirements.txt
 └── README.md
 ```
+
+##  Demo Video
+
+https://github.com/user-attachments/assets/ee20de16-98d4-466a-ba7b-0041e7992fb4
+
 
 ## 🔬 Analytical Methodology
 
