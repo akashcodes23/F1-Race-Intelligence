@@ -27,17 +27,20 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
     # ── 1. Fuel Burn Effect Header ──
     fuel_info = estimate_fuel_effect(laps)
     fuel_val = fuel_info["fuel_effect"]
-    method_str = "Empirical Data Estimate" if fuel_info["is_estimated"] else "Config Physics Default"
+    source_label = "Empirical (Estimated)" if fuel_info["source"] == "estimated" else "Default (Physics Clamped)"
 
     fc1, fc2, fc3, fc4 = st.columns(4)
     with fc1:
         st.metric("Fuel Burn Effect", f"{fuel_val:.3f} s/lap", help="Pace gained per lap as fuel mass burns off")
     with fc2:
-        st.metric("Estimation Source", method_str)
+        st.metric("Estimation Source", source_label, help=fuel_info.get("reason", ""))
     with fc3:
-        st.metric("Transitions Evaluated", fuel_info["transitions_count"])
+        st.metric("Dry Matched Stints", fuel_info["transitions_count"])
     with fc4:
         use_fuel_corr = st.toggle("Enable Fuel Correction", value=True, help="Normalizes laps to race-start fuel mass to isolate true tyre wear")
+
+    if not fuel_info.get("is_estimated", False):
+        st.info(f"ℹ️ **Fuel Estimation Note**: Using default {fuel_val:.3f} s/lap — {fuel_info.get('reason', '')}")
 
     st.markdown("---")
 
@@ -83,7 +86,11 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
             st.info("Insufficient clean laps across field to compute consistency rankings.")
 
     with tab3:
-        st.markdown("**Field-Wide Compound Benchmarks**")
+        st.markdown("**Field-Wide Compound Benchmarks & Confidence Bounds**")
+        st.caption(
+            "⚠️ **Statistical Guidance**: Compound comparisons are subject to overlapping confidence intervals and sample size variance. "
+            "Where 95% CIs overlap, differences in estimated degradation are statistically indistinguishable."
+        )
         compound_df = get_compound_summary(laps, fuel_effect=fuel_val)
         if not compound_df.empty:
             st.dataframe(compound_df, use_container_width=True, hide_index=True)

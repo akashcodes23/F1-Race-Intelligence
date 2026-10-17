@@ -16,13 +16,14 @@ import logging
 from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import pandas as pd
+from sklearn.linear_model import HuberRegressor
 
 from config import (
     DROP_YELLOW_LAPS_DEFAULT,
     MIN_LAPS_FOR_ANALYSIS,
-    OUTLIER_QUANTILE_HIGH,
-    OUTLIER_QUANTILE_LOW,
+    OUTLIER_MAD_K,
 )
 from src.data.schema import validate_laps_df
 
@@ -62,6 +63,84 @@ def is_caution_track_status(status: Any, drop_yellow: bool = False) -> bool:
     return False
 
 
+def filter_stint_mad_outliers(
+    df: pd.DataFrame,
+    mad_k: float = OUTLIER_MAD_K,
+    min_stint_laps: int = 4,
+) -> pd.Series:
+    """
+    Identify pace outliers using a robust per-stint/per-compound residual filter.
+
+    Computes residuals against a robust fit (Huber regression on LapNumber/TyreLife)
+    and flags laps where |residual - median(residuals)| > k * MAD(residuals).
+
+    Parameters:
+      df: DataFrame containing LapTimeSec and grouping columns.
+      mad_k: Multiplier for robust scale (default OUTLIER_MAD_K, e.g. 3.5).
+      min_stint_laps: Minimum laps in a stint to perform robust residual filtering.
+
+    Returns:
+      pd.Series (bool): True for laps that are outliers, False for valid laps.
+    """
+    if df is None or df.empty or "LapTimeSec" not in df.columns:
+        return pd.Series(False, index=df.index if df is not None else [])
+
+    outlier_mask = pd.Series(False, index=df.index)
+
+    # Determine grouping: Driver + Stint, Driver + Compound, Driver, or whole frame
+    if "Driver" in df.columns and "Stint" in df.columns:
+        group_cols = ["Driver", "Stint"]
+    elif "Driver" in df.columns and "Compound" in df.columns:
+        group_cols = ["Driver", "Compound"]
+    elif "Driver" in df.columns:
+        group_cols = ["Driver"]
+    elif "Compound" in df.columns:
+        group_cols = ["Compound"]
+    else:
+        group_cols = None
+
+    if group_cols is not None:
+        groups = df.groupby(group_cols)
+    else:
+        groups = [(None, df)]
+
+    for _grp_id, grp in groups:
+        if len(grp) < min_stint_laps:
+            continue
+
+        x_col = "LapNumber" if "LapNumber" in grp.columns else ("TyreLife" if "TyreLife" in grp.columns else None)
+        y = grp["LapTimeSec"].values.astype(float)
+        if x_col is not None:
+            x = grp[x_col].values.astype(float)
+        else:
+            x = np.arange(len(grp), dtype=float)
+
+        # Fit robust trend
+        if len(grp) >= 5:
+            try:
+                huber = HuberRegressor(epsilon=1.35, max_iter=150)
+                huber.fit(x.reshape(-1, 1), y)
+                y_pred = huber.predict(x.reshape(-1, 1))
+                residuals = y - y_pred
+            except Exception:
+                p = np.polyfit(x, y, 1)
+                residuals = y - np.polyval(p, x)
+        else:
+            residuals = y - np.median(y)
+
+        med_res = float(np.median(residuals))
+        abs_dev = np.abs(residuals - med_res)
+        mad = float(np.median(abs_dev) * 1.4826)
+        scale = max(mad, 0.25)
+        cutoff = mad_k * scale
+
+        grp_outliers = abs_dev > cutoff
+        if grp_outliers.any():
+            outlier_mask.loc[grp.index[grp_outliers]] = True
+
+    return outlier_mask
+
+
 def clean_laps(
     laps: pd.DataFrame,
     drop_pit_laps: bool = True,
@@ -70,8 +149,10 @@ def clean_laps(
     drop_inaccurate: bool = True,
     drop_lap1: bool = True,
     min_laps: int = MIN_LAPS_FOR_ANALYSIS,
-    outlier_low: float = OUTLIER_QUANTILE_LOW,
-    outlier_high: float = OUTLIER_QUANTILE_HIGH,
+    outlier_mad_k: float = OUTLIER_MAD_K,
+    filter_outliers: bool = True,
+    outlier_low: Optional[float] = None,
+    outlier_high: Optional[float] = None,
     remove_pit_laps: Optional[bool] = None,
 ) -> pd.DataFrame:
     """
@@ -85,6 +166,8 @@ def clean_laps(
         drop_inaccurate=drop_inaccurate,
         drop_lap1=drop_lap1,
         min_laps=min_laps,
+        outlier_mad_k=outlier_mad_k,
+        filter_outliers=filter_outliers,
         outlier_low=outlier_low,
         outlier_high=outlier_high,
         remove_pit_laps=remove_pit_laps,
@@ -100,8 +183,10 @@ def clean_laps_with_stats(
     drop_inaccurate: bool = True,
     drop_lap1: bool = True,
     min_laps: int = MIN_LAPS_FOR_ANALYSIS,
-    outlier_low: float = OUTLIER_QUANTILE_LOW,
-    outlier_high: float = OUTLIER_QUANTILE_HIGH,
+    outlier_mad_k: float = OUTLIER_MAD_K,
+    filter_outliers: bool = True,
+    outlier_low: Optional[float] = None,
+    outlier_high: Optional[float] = None,
     remove_pit_laps: Optional[bool] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
@@ -204,11 +289,10 @@ def clean_laps_with_stats(
             record_dropped(inaccurate_mask, "inaccurate_laps")
             df = df[~inaccurate_mask]
 
-    # 8. Quantile-based outlier trimming
-    if len(df) >= min_laps and outlier_low > 0.0 and outlier_high < 1.0:
-        q_low = df["LapTimeSec"].quantile(outlier_low)
-        q_high = df["LapTimeSec"].quantile(outlier_high)
-        outlier_mask = (df["LapTimeSec"] < q_low) | (df["LapTimeSec"] > q_high)
+    # 8. Per-stint / per-compound robust MAD outlier filter
+    bypass_outliers = (outlier_low == 0.0 and outlier_high == 1.0)
+    if filter_outliers and not bypass_outliers and len(df) >= min_laps and outlier_mad_k > 0:
+        outlier_mask = filter_stint_mad_outliers(df, mad_k=outlier_mad_k)
         record_dropped(outlier_mask, "outliers")
         df = df[~outlier_mask]
 

@@ -35,7 +35,7 @@ class TestDriverComparison(unittest.TestCase):
 
     def test_compute_driver_delta(self):
         merged, summary = compute_driver_delta(self.laps, "VER", "HAM")
-        self.assertEqual(len(merged), 17)
+        self.assertEqual(len(merged), 19)
         self.assertIn("Delta", merged.columns)
         self.assertIn("CumulativeDelta", merged.columns)
         self.assertIn("faster_driver", summary)
@@ -47,7 +47,7 @@ class TestDriverComparison(unittest.TestCase):
         self.assertIn("VER", res)
         self.assertIn("HAM", res)
         self.assertTrue(res["VER"]["std"] > 0)
-        self.assertEqual(res["VER"]["n_laps"], 17)
+        self.assertEqual(res["VER"]["n_laps"], 19)
 
     def test_compare_driver_sectors(self):
         df, summary = compare_driver_sectors(self.laps, "VER", "HAM")

@@ -10,7 +10,12 @@ __pycache__/
 cache/
 .cache/
 *.sqlite
+*.db
 *.ff1pkl
+
+# Testing & Caches
+.pytest_cache/
+.ruff_cache/
 
 # OS files
 .DS_Store

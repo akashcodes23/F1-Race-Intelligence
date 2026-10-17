@@ -28,11 +28,16 @@ TEST_SIZE = 0.2
 # ─── Strategy & Race Physics ──────────────────────────────
 DEFAULT_PIT_LOSS_SECONDS = 22.0
 DEFAULT_FUEL_EFFECT_SEC_PER_LAP = 0.033  # Nominal fuel burn pace gain (seconds per lap)
-MIN_FUEL_EFFECT_BOUND = 0.015            # Minimum realistic fuel burn effect
-MAX_FUEL_EFFECT_BOUND = 0.075            # Maximum realistic fuel burn effect
+MIN_FUEL_EFFECT_BOUND = 0.02             # Configurable plausible range minimum (default 0.02 s/lap)
+MAX_FUEL_EFFECT_BOUND = 0.05             # Configurable plausible range maximum (default 0.05 s/lap)
+
+# ─── Outlier Filtering (MAD Residuals) ───────────────────
+OUTLIER_MAD_K = 3.5                       # Configurable robust MAD multiplier for stint residuals
 
 # ─── Tyre Degradation & Cliff Detection ───────────────────
-MIN_LAPS_FOR_CLIFF_DETECTION = 8
+CLIFF_MIN_TYRE_AGE = 10                  # Minimum tyre age before a knot is allowed (default 10)
+CLIFF_MIN_LAPS_PRE = 5                   # Minimum laps before candidate cliff knot
+CLIFF_MIN_LAPS_POST = 4                  # Minimum laps after candidate cliff knot
 CLIFF_SLOPE_MULTIPLIER = 1.6
 DROP_YELLOW_LAPS_DEFAULT = False
 
