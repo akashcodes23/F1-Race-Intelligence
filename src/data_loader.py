@@ -1,23 +1,25 @@
-import fastf1
-import os
+"""
+F1 Race Intelligence — Data Loader (Compatibility Shim)
 
-# -------------------------------------------------
-# Enable FastF1 Cache
-# -------------------------------------------------
+Re-exports from src.data.loader.
+"""
 
-CACHE_DIR = "cache"
+from src.data.loader import (
+    get_available_sessions,
+    get_driver_laps,
+    get_event_names,
+    get_event_schedule,
+    get_session_drivers,
+    init_cache,
+    load_session,
+)
 
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
-
-fastf1.Cache.enable_cache(CACHE_DIR)
-
-
-def load_race_data(year, race, session_type="R"):
-    """
-    Load full session laps.
-    """
-    session = fastf1.get_session(year, race, session_type)
-    session.load()
-
-    return session.laps
+__all__ = [
+    "init_cache",
+    "get_event_schedule",
+    "get_event_names",
+    "get_available_sessions",
+    "load_session",
+    "get_session_drivers",
+    "get_driver_laps",
+]
