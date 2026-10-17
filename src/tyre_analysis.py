@@ -75,8 +75,21 @@ def detect_tyre_cliff(
     if n < min_laps_pre + min_laps_post:
         return no_cliff
 
-    single_fit = np.polyfit(x, y, 1)
-    single_err = float(np.sum((y - np.poly1d(single_fit)(x)) ** 2))
+    def _fit_line(lx, ly):
+        if len(lx) < 2:
+            return None
+        xm, ym = float(np.mean(lx)), float(np.mean(ly))
+        ss_x = float(np.sum((lx - xm) ** 2))
+        if ss_x <= 1e-12:
+            return None
+        slp = float(np.sum((lx - xm) * (ly - ym)) / ss_x)
+        icept = ym - slp * xm
+        return np.array([slp, icept])
+
+    single_fit = _fit_line(x, y)
+    if single_fit is None:
+        return no_cliff
+    single_err = float(np.sum((y - (single_fit[0] * x + single_fit[1])) ** 2))
     if single_err <= 1e-6:
         return no_cliff
 
@@ -95,12 +108,14 @@ def detect_tyre_cliff(
         if mask1.sum() < min_laps_pre or mask2.sum() < min_laps_post:
             continue
 
-        p1 = np.polyfit(x[mask1], y[mask1], 1)
-        p2 = np.polyfit(x[mask2], y[mask2], 1)
+        p1 = _fit_line(x[mask1], y[mask1])
+        p2 = _fit_line(x[mask2], y[mask2])
+        if p1 is None or p2 is None:
+            continue
 
         two_err = float(
-            np.sum((y[mask1] - np.poly1d(p1)(x[mask1])) ** 2)
-            + np.sum((y[mask2] - np.poly1d(p2)(x[mask2])) ** 2)
+            np.sum((y[mask1] - (p1[0] * x[mask1] + p1[1])) ** 2)
+            + np.sum((y[mask2] - (p2[0] * x[mask2] + p2[1])) ** 2)
         )
         err_drop = (single_err - two_err) / single_err
 

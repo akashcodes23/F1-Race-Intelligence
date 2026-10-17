@@ -41,28 +41,31 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
             f"{cv.get('n_races', 13)} Grand Prix events (2021–2023). Target: Relative Lap Time (s) vs Driver Early Reference Pace."
         )
 
-        naive_cv = cv.get("naive_baseline", {})
         pers_cv = cv.get("persistence_baseline", {})
         huber_cv = cv.get("huber_per_stint", {})
-        ridge_cv = cv.get("scaled_ridge", {})
+        s1_cv = cv.get("static_baseline_s1", {})
+        s2_cv = cv.get("static_baseline_s2", {})
         hgbr_a = cv.get("gradient_boosting_A", {})
+        hgbr_b = cv.get("gradient_boosting_B", {})
+        hgbr_b_mono = cv.get("gradient_boosting_B_monotonic", {})
 
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric(
-            label="Naive Reference",
-            value=f"{naive_cv.get('mean_mae', 1.185):.3f}s",
-            delta=f"RMSE: {naive_cv.get('mean_rmse', 1.473):.3f}s",
+            label="S1 Physics Linear",
+            value=f"{s1_cv.get('mean_mae', 0.695):.3f}s",
+            delta=f"RMSE: {s1_cv.get('mean_rmse', 0.957):.3f}s",
             delta_color="off",
         )
         m2.metric(
+            label="S2 Scaled Ridge",
+            value=f"{s2_cv.get('mean_mae', 0.718):.3f}s",
+            delta=f"RMSE: {s2_cv.get('mean_rmse', 0.984):.3f}s",
+            delta_color="off",
+        )
+        m3.metric(
             label="Huber Per-Stint (Phase 1)",
             value=f"{huber_cv.get('mean_mae', 0.424):.3f}s",
             delta=f"RMSE: {huber_cv.get('mean_rmse', 0.664):.3f}s",
-        )
-        m3.metric(
-            label="Scaled Ridge (Pipeline)",
-            value=f"{ridge_cv.get('mean_mae', 0.395):.3f}s",
-            delta=f"RMSE: {ridge_cv.get('mean_rmse', 0.602):.3f}s",
         )
         m4.metric(
             label="Persistence Baseline",
@@ -70,19 +73,25 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
             delta=f"RMSE: {pers_cv.get('mean_rmse', 0.626):.3f}s",
         )
         m5.metric(
+            label="HGBR Variant B (Static)",
+            value=f"{hgbr_b.get('mean_mae', 0.776):.3f}s",
+            delta=f"Mono: {hgbr_b_mono.get('mean_mae', 0.771):.3f}s",
+            delta_color="off",
+        )
+        m6.metric(
             label="HGBR Variant A (Champion)",
             value=f"{hgbr_a.get('mean_mae', 0.367):.3f}s",
             delta=f"RMSE: {hgbr_a.get('mean_rmse', 0.573):.3f}s (-4.4% MAE)",
             delta_color="normal",
         )
 
-        # Honest comparison verdict
-        gain_vs_pers = pers_cv.get("mean_mae", 0.384) - hgbr_a.get("mean_mae", 0.367)
-        gain_vs_ridge = ridge_cv.get("mean_mae", 0.395) - hgbr_a.get("mean_mae", 0.367)
-        st.success(
-            f"✅ **Statistical Verification:** HistGradientBoosting (Variant A) outperforms **all baselines** across the 13 held-out Grand Prix events: "
-            f"beating Persistence by **{gain_vs_pers:.3f}s MAE** and **{pers_cv.get('mean_rmse', 0.626) - hgbr_a.get('mean_rmse', 0.573):.3f}s RMSE**, "
-            f"and beating Scaled Ridge by **{gain_vs_ridge:.3f}s MAE** and **{ridge_cv.get('mean_rmse', 0.602) - hgbr_a.get('mean_rmse', 0.573):.3f}s RMSE**."
+        # Honest comparison verdict & Phase 3 Selection
+        st.info(
+            f"⚖️ **Model Comparison & Phase 3 Strategy Engine Verdict (Decision Rule A4):**\\n"
+            f"- **Single-Lap Autoregressive:** Variant A achieves lowest 1-step MAE (**{hgbr_a.get('mean_mae', 0.367):.3f}s**) beating Persistence ({pers_cv.get('mean_mae', 0.384):.3f}s).\\n"
+            f"- **Long-Horizon Multi-Step ($H=10, 20$):** Static physics baseline $S_1$ achieves lower stint-total error than Variant B (9.77s vs 9.90s at $H=10$, and 18.33s vs 19.72s at $H=20$). "
+            f"Moreover, Variant B's learned partial dependence severely underestimates physical fuel effect (+0.0094 s/lap vs empirical 0.058 s/lap). "
+            f"**Phase 3 Strategy Simulator therefore uses $S_1$ (Physics Linear Baseline with empirical residuals) per Decision Rule A4.**"
         )
 
         # ── Inspection Tabs ──
@@ -127,30 +136,51 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
             )
 
         with tab_horizons:
-            st.markdown("##### Multi-Step Stint Forecast Horizon Evaluation")
-            st.markdown("""
-            Comparison of forecast accuracy when projecting lap times into the future from a forecast origin:
-            - **Variant A (Autoregressive):** Feeds its own sequential predictions recursively into `PrevLapRelativePace`.
-            - **Variant B (Multi-Step Static Origin):** Directly evaluates future strategy parameters (tyre age, compound, laps remaining) without autoregressive feedback.
+            st.markdown("##### Multi-Step Stint Forecast Horizon Evaluation (Multi-Origin Benchmark)")
+            st.markdown(r"""
+            Multi-step forecast accuracy when projecting lap times into the future across **multiple stint origins** (Tyre Life ~ 3, 8, and 15)
+            across all eligible stints in the 13 held-out Grand Prix events:
+            - **Persistence ($\hat{y}_{t+h} = y_0$):** Projects the last observed lap relative pace forward flatly.
+            - **Huber (Prior Stint):** Fits a Huber linear model on laps before origin, projecting degradation into the future.
+            - **$S_1$ (Physics Linear Baseline):** Reference pace + fuel burn-off + per-compound linear degradation.
+            - **$S_2$ (Scaled Ridge on B):** `StandardScaler + Ridge` trained on static stint features without previous pace.
+            - **Variant A (Recursive):** Feeds sequential predictions recursively into `PrevLapRelativePace`.
+            - **Variant B (Static Unconstrained & Monotonic):** Static origin features (`TyreLife`, `Compound`, `LapsRemaining`, `LapNumber`).
             """)
             h_data = cv.get("horizon_evaluation", {})
             if h_data:
-                h_df = pd.DataFrame(h_data).T
-                st.dataframe(
-                    h_df.rename(columns={
-                        "horizon_laps": "Forecast Horizon (Laps Ahead)",
-                        "variant_A_recursive_mae": "Variant A Recursive MAE (s)",
-                        "variant_B_static_mae": "Variant B Static Origin MAE (s)",
-                    }),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                rows = []
+                for h_key, h_info in h_data.items():
+                    h_val = h_info.get("horizon_laps", int(h_key.split("_")[1]) if "_" in h_key else 1)
+                    models_dict = h_info.get("models", {})
+                    for m_name, m_metrics in models_dict.items():
+                        rows.append({
+                            "Horizon (H)": f"H = {h_val} laps",
+                            "Model": m_name,
+                            "N": m_metrics.get("N", 0),
+                            "MAE at H (s)": round(m_metrics.get("mae_at_h", 0.0), 3),
+                            "Signed Cum Error (Bias, s)": f"{m_metrics.get('signed_cum_err', 0.0):+.3f}",
+                            "Abs Cum Error (Stint Total, s)": round(m_metrics.get("abs_cum_err", 0.0), 3),
+                        })
+                if rows:
+                    h_table_df = pd.DataFrame(rows)
+                    st.dataframe(h_table_df, use_container_width=True, hide_index=True)
 
-            st.info(
-                "📌 **Phase 3 Strategy Simulator Selection:** The Strategy Simulator simulates entire future stints "
-                "(20–30 laps ahead) where future intermediate lap times are unobservable. While Variant A excels at short horizons "
-                "($H=1$ MAE = 0.342s), **Variant B (Multi-Step Static)** will be utilized by the Phase 3 Strategy Simulator because it "
-                "models direct strategy physics (tyre life, compound, fuel burn) without compounding autoregressive error drift across long horizons."
+            st.markdown("""
+            **Why Variant B's Curve Changes with Horizon ($H$) Even Though It Ignores the Origin:**
+            Although Variant B excludes the origin pace ($y_0$) and evaluates lap times from static strategy parameters,
+            as the horizon $H$ increases, its input features evolve:
+            - $\\text{TyreLife}_{t+H} = \\text{TyreLife}_0 + H$ (tyre wear advances)
+            - $\\text{LapsRemaining}_{t+H} = \\text{LapsRemaining}_0 - H$ (fuel weight burns off)
+            - $\\text{LapNumber}_{t+H} = \\text{LapNumber}_0 + H$ (track grip evolves)
+            Thus, Variant B projects a dynamic trajectory even without autoregressive memory.
+            """)
+
+            st.warning(
+                "⚖️ **Decision Rule A4 Verdict for Phase 3:**\\n"
+                "- Variant B fails to beat the static physics baseline $S_1$ on average stint-total absolute error at $H=10$ (9.90s vs 9.77s) and $H=20$ (19.72s vs 18.33s).\\n"
+                "- Counterfactual partial-dependence analysis demonstrates that Variant B's learned fuel effect (+0.0094 s/lap) severely underestimates physical reality (0.058 s/lap).\\n"
+                "**Decision:** Phase 3 Strategy Simulator will use **$S_1$ (Physics Linear Model with empirical residuals)**."
             )
 
         with tab_residuals:

@@ -192,14 +192,16 @@ def estimate_fuel_effect(
     else:
         reason = (
             f"Empirical rate {empirical_rate:.4f} s/lap outside plausible bounds "
-            f"[{min_bound}, {max_bound}]; clamped fallback to default"
+            f"[{min_bound}, {max_bound}]; excluded from pooling"
         )
-        logger.warning(f"Fuel estimation fallback: {reason}")
+        logger.warning(f"Fuel estimation out-of-bounds: {reason}")
         return {
             "fuel_effect": float(default_effect),
-            "source": "default",
+            "empirical_rate": round(empirical_rate, 4),
+            "source": "out_of_bounds",
             "is_estimated": False,
-            "method": "config_default",
+            "is_out_of_bounds": True,
+            "method": "out_of_bounds_excluded",
             "reason": reason,
             "transitions_count": len(rates),
             "default_effect": float(default_effect),

@@ -123,7 +123,8 @@ class TestFuelEffect(unittest.TestCase):
             drivers_data.extend([s1, s2])
         laps = pd.concat(drivers_data, ignore_index=True)
         res = estimate_fuel_effect(laps, min_bound=0.02, max_bound=0.05)
-        self.assertEqual(res["source"], "default")
+        self.assertEqual(res["source"], "out_of_bounds")
+        self.assertTrue(res["is_out_of_bounds"])
         self.assertIn("outside plausible bounds", res["reason"])
 
     def test_estimate_fuel_effect_successful_estimation(self):

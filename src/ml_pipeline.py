@@ -214,6 +214,42 @@ def prepare_ml_features(
     return X, y, feature_cols
 
 
+def fit_s1(
+    X_tr: pd.DataFrame,
+    y_tr: pd.Series,
+    fuel_effect: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> Dict[str, float]:
+    """Fit per-compound linear degradation slope on fuel-corrected relative pace."""
+    slopes = {}
+    for comp in ["SOFT", "MEDIUM", "HARD"]:
+        c_mask = (X_tr[f"Compound_{comp}"] == 1.0)
+        if c_mask.sum() < 10:
+            slopes[comp] = 0.04
+            continue
+        fuel_term = fuel_effect * (X_tr.loc[c_mask, "LapsRemaining"] - (X_tr.loc[c_mask, "LapsRemaining"] + X_tr.loc[c_mask, "LapNumber"] - 4.0))
+        y_adj = y_tr[c_mask] - fuel_term
+        tl = X_tr.loc[c_mask, "TyreLife"].values
+        deg_slope = float(np.sum(tl * y_adj.values) / np.maximum(np.sum(tl ** 2), 1e-6))
+        slopes[comp] = max(0.005, deg_slope)
+    return slopes
+
+
+def predict_s1(
+    X_te: pd.DataFrame,
+    slopes: Dict[str, float],
+    fuel_effect: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> np.ndarray:
+    """Predict relative lap pace using S1 physics linear baseline."""
+    preds = np.zeros(len(X_te))
+    fuel_term = fuel_effect * (X_te["LapsRemaining"] - (X_te["LapsRemaining"] + X_te["LapNumber"] - 4.0))
+    for comp in ["SOFT", "MEDIUM", "HARD"]:
+        c_mask = (X_te[f"Compound_{comp}"] == 1.0)
+        if c_mask.sum() > 0:
+            deg = slopes.get(comp, 0.04)
+            preds[c_mask] = fuel_term[c_mask] + deg * X_te.loc[c_mask, "TyreLife"]
+    return preds
+
+
 def train_and_evaluate_models(
     laps_data: pd.DataFrame,
     save_artifact_path: Optional[str] = DEFAULT_MODEL_PATH,
@@ -276,9 +312,12 @@ def train_and_evaluate_models(
             "Naive Baseline": [],
             "Persistence": [],
             "Huber Per-Stint": [],
+            "S1 Physics Linear": [],
+            "S2 Scaled Ridge": [],
             "Scaled Ridge": [],
             "HGBR Variant A": [],
             "HGBR Variant B": [],
+            "HGBR Variant B Monotonic": [],
         }
 
         all_y_true = []
@@ -286,10 +325,21 @@ def train_and_evaluate_models(
         all_tyre_life = []
         all_compounds = []
 
-        # Horizon evaluations (H = 1, 5, 10, 20 laps)
+        # Multi-origin horizon evaluations (H = 1, 5, 10, 20 laps)
         horizons = [1, 5, 10, 20]
-        horizon_errors_A: Dict[int, List[float]] = {h: [] for h in horizons}
-        horizon_errors_B: Dict[int, List[float]] = {h: [] for h in horizons}
+        target_origins = [3, 8, 15]
+        horizon_records: Dict[str, Dict[int, Dict[str, List[float]]]] = {
+            m: {h: {"abs_err": [], "cum_err": []} for h in horizons}
+            for m in [
+                "Persistence",
+                "Huber (Prior Stint)",
+                "S1 Physics Linear",
+                "S2 Scaled Ridge",
+                "Variant A (Recursive)",
+                "Variant B (Unconstrained)",
+                "Variant B (Monotonic)",
+            ]
+        }
 
         for train_idx, test_idx in logo.split(X_A, y, groups=race_ids):
             held_out_race = race_ids.iloc[test_idx].iloc[0]
@@ -315,6 +365,7 @@ def train_and_evaluate_models(
                 "Driver": drivers.iloc[test_idx].values,
                 "Stint": stints.iloc[test_idx].values,
                 "LapNumber": X_A_te["LapNumber"].values,
+                "TyreLife": X_A_te["TyreLife"].values,
                 "LapsRemaining": X_A_te["LapsRemaining"].values,
                 "RelativeLapTimeSec": y_te.values,
                 "PrevLapRelativePace": X_A_te["PrevLapRelativePace"].values,
@@ -351,18 +402,35 @@ def train_and_evaluate_models(
             rmse_huber = float(np.sqrt(mean_squared_error(y_te, pred_huber_arr)))
             fold_scores["Huber Per-Stint"].append({"race": held_out_race, "mae": mae_huber, "rmse": rmse_huber})
 
-            # 4. Scaled Ridge Regression (StandardScaler + Ridge)
+            # 4. S1 Physics Linear Model
+            s1_slopes = fit_s1(X_B_tr, y_tr, fuel_effect=fuel_constant)
+            pred_s1 = predict_s1(X_B_te, s1_slopes, fuel_effect=fuel_constant)
+            mae_s1 = float(mean_absolute_error(y_te, pred_s1))
+            rmse_s1 = float(np.sqrt(mean_squared_error(y_te, pred_s1)))
+            fold_scores["S1 Physics Linear"].append({"race": held_out_race, "mae": mae_s1, "rmse": rmse_s1})
+
+            # 5. S2 Scaled Ridge on Variant B
+            pipe_s2 = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+            pipe_s2.fit(X_B_tr, y_tr)
+            with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+                pred_s2 = pipe_s2.predict(X_B_te)
+            assert np.all(np.isfinite(pred_s2)), "S2 Scaled Ridge predictions contain non-finite values"
+            mae_s2 = float(mean_absolute_error(y_te, pred_s2))
+            rmse_s2 = float(np.sqrt(mean_squared_error(y_te, pred_s2)))
+            fold_scores["S2 Scaled Ridge"].append({"race": held_out_race, "mae": mae_s2, "rmse": rmse_s2})
+
+            # 6. Scaled Ridge on Variant A (features including PrevLapRelativePace)
             pipe_ridge = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
             pipe_ridge.fit(X_A_tr, y_tr)
-            # Scoped np.errstate: Apple Accelerate BLAS under NumPy 2.x on macOS can raise spurious
-            # divide-by-zero hardware exception flags during matrix multiplications even with valid finite floats.
+            assert np.all(np.isfinite(X_A_te.values)), "Features matrix X_A_te contains non-finite values"
             with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
                 pred_ridge = pipe_ridge.predict(X_A_te)
+            assert np.all(np.isfinite(pred_ridge)), "Scaled Ridge predictions contain non-finite values"
             mae_ridge = float(mean_absolute_error(y_te, pred_ridge))
             rmse_ridge = float(np.sqrt(mean_squared_error(y_te, pred_ridge)))
             fold_scores["Scaled Ridge"].append({"race": held_out_race, "mae": mae_ridge, "rmse": rmse_ridge})
 
-            # 5. HistGradientBoosting Variant A (1-step Autoregressive)
+            # 7. HistGradientBoosting Variant A (1-step Autoregressive)
             gb_a = HistGradientBoostingRegressor(
                 learning_rate=0.05,
                 max_iter=150,
@@ -376,7 +444,7 @@ def train_and_evaluate_models(
             rmse_gb_a = float(np.sqrt(mean_squared_error(y_te, pred_gb_a)))
             fold_scores["HGBR Variant A"].append({"race": held_out_race, "mae": mae_gb_a, "rmse": rmse_gb_a})
 
-            # 6. HistGradientBoosting Variant B (Multi-step Static Origin)
+            # 8. HistGradientBoosting Variant B (Unconstrained)
             gb_b = HistGradientBoostingRegressor(
                 learning_rate=0.05,
                 max_iter=150,
@@ -390,38 +458,100 @@ def train_and_evaluate_models(
             rmse_gb_b = float(np.sqrt(mean_squared_error(y_te, pred_gb_b)))
             fold_scores["HGBR Variant B"].append({"race": held_out_race, "mae": mae_gb_b, "rmse": rmse_gb_b})
 
-            # 7. Horizon Evaluation across stints
+            # 9. HistGradientBoosting Variant B (Monotonic Constraints: TyreLife +1, LapsRemaining +1)
+            gb_b_mono = HistGradientBoostingRegressor(
+                learning_rate=0.05,
+                max_iter=150,
+                max_depth=5,
+                l2_regularization=1.0,
+                monotonic_cst=[1, 1, 0, 0, 0, 0],
+                random_state=42,
+            )
+            gb_b_mono.fit(X_B_tr, y_tr)
+            pred_gb_b_mono = gb_b_mono.predict(X_B_te)
+            mae_gb_b_mono = float(mean_absolute_error(y_te, pred_gb_b_mono))
+            rmse_gb_b_mono = float(np.sqrt(mean_squared_error(y_te, pred_gb_b_mono)))
+            fold_scores["HGBR Variant B Monotonic"].append({"race": held_out_race, "mae": mae_gb_b_mono, "rmse": rmse_gb_b_mono})
+
+            # Multi-origin Horizon Evaluation across stints (TyreLife ~ 3, 8, 15)
             for (_drv_h, _st_h), sgrp in test_df_fold.groupby(["Driver", "Stint"]):
-                sgrp = sgrp.sort_values("LapNumber")
-                if len(sgrp) < 22:
+                sgrp = sgrp.sort_values("TyreLife").reset_index(drop=True)
+                if len(sgrp) < 10:
                     continue
-                origin_idx = 2
-                origin_row = sgrp.iloc[origin_idx]
-                origin_lap = origin_row["LapNumber"]
 
-                for h in horizons:
-                    target_lap = origin_lap + h
-                    t_rows = sgrp[sgrp["LapNumber"] == target_lap]
-                    if not t_rows.empty:
-                        target_loc = t_rows.index[0]
-                        y_true_h = t_rows["RelativeLapTimeSec"].values[0]
+                for orig_tl in target_origins:
+                    tl_diffs = np.abs(sgrp["TyreLife"] - orig_tl)
+                    if tl_diffs.min() > 1:
+                        continue
+                    orig_idx = int(tl_diffs.argmin())
+                    orig_row = sgrp.iloc[orig_idx]
+                    orig_pace = orig_row["RelativeLapTimeSec"]
+                    prior_laps = sgrp.iloc[: orig_idx + 1]
 
-                        # Variant B (static origin prediction)
-                        row_b = X_B_te.loc[[X_B_te.index[target_loc]]]
-                        pred_h_b = gb_b.predict(row_b)[0]
-                        horizon_errors_B[h].append(float(abs(y_true_h - pred_h_b)))
+                    for h in horizons:
+                        end_idx = orig_idx + h
+                        if end_idx >= len(sgrp):
+                            continue
 
-                        # Variant A (recursive autoregressive rollout)
-                        pred_roll = origin_row["RelativeLapTimeSec"]
-                        for step in range(1, h + 1):
-                            step_lap = origin_lap + step
-                            st_match = sgrp[sgrp["LapNumber"] == step_lap]
-                            if not st_match.empty:
-                                match_loc = st_match.index[0]
-                                row_roll = X_A_te.loc[[X_A_te.index[match_loc]]].copy()
-                                row_roll["PrevLapRelativePace"] = pred_roll
-                                pred_roll = gb_a.predict(row_roll)[0]
-                        horizon_errors_A[h].append(float(abs(y_true_h - pred_roll)))
+                        target_pace = sgrp.iloc[end_idx]["RelativeLapTimeSec"]
+                        horizon_slice = sgrp.iloc[orig_idx + 1 : end_idx + 1]
+                        actual_laps_y = horizon_slice["RelativeLapTimeSec"].values
+
+                        # Horizon slice features
+                        h_indices = horizon_slice.index
+                        sub_X_B = X_B_te.loc[X_B_te.index[h_indices]]
+                        sub_X_A = X_A_te.loc[X_A_te.index[h_indices]]
+
+                        # Persistence
+                        p_pers = np.full(h, orig_pace)
+                        horizon_records["Persistence"][h]["abs_err"].append(float(abs(p_pers[-1] - target_pace)))
+                        horizon_records["Persistence"][h]["cum_err"].append(float(np.sum(p_pers - actual_laps_y)))
+
+                        # Huber
+                        if len(prior_laps) >= 4:
+                            try:
+                                hr_m = HuberRegressor().fit(prior_laps["TyreLife"].values.reshape(-1, 1), prior_laps["RelativeLapTimeSec"].values)
+                                p_hub = hr_m.predict(horizon_slice["TyreLife"].values.reshape(-1, 1))
+                            except Exception:
+                                p_hub = np.full(h, orig_pace)
+                        else:
+                            p_hub = np.full(h, orig_pace)
+                        horizon_records["Huber (Prior Stint)"][h]["abs_err"].append(float(abs(p_hub[-1] - target_pace)))
+                        horizon_records["Huber (Prior Stint)"][h]["cum_err"].append(float(np.sum(p_hub - actual_laps_y)))
+
+                        # S1
+                        p_s1 = predict_s1(sub_X_B, s1_slopes, fuel_effect=fuel_constant)
+                        horizon_records["S1 Physics Linear"][h]["abs_err"].append(float(abs(p_s1[-1] - target_pace)))
+                        horizon_records["S1 Physics Linear"][h]["cum_err"].append(float(np.sum(p_s1 - actual_laps_y)))
+
+                        # S2
+                        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+                            p_s2 = pipe_s2.predict(sub_X_B)
+                        horizon_records["S2 Scaled Ridge"][h]["abs_err"].append(float(abs(p_s2[-1] - target_pace)))
+                        horizon_records["S2 Scaled Ridge"][h]["cum_err"].append(float(np.sum(p_s2 - actual_laps_y)))
+
+                        # Variant B
+                        p_b = gb_b.predict(sub_X_B)
+                        horizon_records["Variant B (Unconstrained)"][h]["abs_err"].append(float(abs(p_b[-1] - target_pace)))
+                        horizon_records["Variant B (Unconstrained)"][h]["cum_err"].append(float(np.sum(p_b - actual_laps_y)))
+
+                        # Variant B Monotonic
+                        p_bm = gb_b_mono.predict(sub_X_B)
+                        horizon_records["Variant B (Monotonic)"][h]["abs_err"].append(float(abs(p_bm[-1] - target_pace)))
+                        horizon_records["Variant B (Monotonic)"][h]["cum_err"].append(float(np.sum(p_bm - actual_laps_y)))
+
+                        # Variant A (recursive)
+                        curr_pace = orig_pace
+                        p_a_seq = []
+                        for step_idx in range(h):
+                            s_row = sub_X_A.iloc[[step_idx]].copy()
+                            s_row["PrevLapRelativePace"] = curr_pace
+                            pred_step = float(gb_a.predict(s_row)[0])
+                            p_a_seq.append(pred_step)
+                            curr_pace = pred_step
+                        p_a_seq = np.array(p_a_seq)
+                        horizon_records["Variant A (Recursive)"][h]["abs_err"].append(float(abs(p_a_seq[-1] - target_pace)))
+                        horizon_records["Variant A (Recursive)"][h]["cum_err"].append(float(np.sum(p_a_seq - actual_laps_y)))
 
             cv_results["per_race_eval"].append({
                 "RaceID": held_out_race,
@@ -429,15 +559,21 @@ def train_and_evaluate_models(
                 "Naive_MAE": round(mae_naive, 3),
                 "Persistence_MAE": round(mae_pers, 3),
                 "Huber_MAE": round(mae_huber, 3),
+                "S1_MAE": round(mae_s1, 3),
+                "S2_MAE": round(mae_s2, 3),
                 "Ridge_MAE": round(mae_ridge, 3),
                 "HGBR_A_MAE": round(mae_gb_a, 3),
                 "HGBR_B_MAE": round(mae_gb_b, 3),
+                "HGBR_BMono_MAE": round(mae_gb_b_mono, 3),
                 "Naive_RMSE": round(rmse_naive, 3),
                 "Persistence_RMSE": round(rmse_pers, 3),
                 "Huber_RMSE": round(rmse_huber, 3),
+                "S1_RMSE": round(rmse_s1, 3),
+                "S2_RMSE": round(rmse_s2, 3),
                 "Ridge_RMSE": round(rmse_ridge, 3),
                 "HGBR_A_RMSE": round(rmse_gb_a, 3),
                 "HGBR_B_RMSE": round(rmse_gb_b, 3),
+                "HGBR_BMono_RMSE": round(rmse_gb_b_mono, 3),
                 "HGBR_vs_Persistence_Gain": round(mae_pers - mae_gb_a, 3),
                 "HGBR_vs_Ridge_Gain": round(mae_ridge - mae_gb_a, 3),
             })
@@ -452,9 +588,12 @@ def train_and_evaluate_models(
             ("Naive Baseline", "naive_baseline"),
             ("Persistence", "persistence_baseline"),
             ("Huber Per-Stint", "huber_per_stint"),
+            ("S1 Physics Linear", "s1_physics_linear"),
+            ("S2 Scaled Ridge", "s2_scaled_ridge"),
             ("Scaled Ridge", "scaled_ridge"),
             ("HGBR Variant A", "gradient_boosting_A"),
             ("HGBR Variant B", "gradient_boosting_B"),
+            ("HGBR Variant B Monotonic", "gradient_boosting_B_monotonic"),
         ]:
             maes = [f["mae"] for f in fold_scores[m_key]]
             rmses = [f["rmse"] for f in fold_scores[m_key]]
@@ -466,12 +605,21 @@ def train_and_evaluate_models(
                 "std_rmse": float(np.std(rmses)),
             }
 
-        # Multi-step Horizon summary
+        # Multi-origin Horizon summary
         for h in horizons:
             cv_results["horizon_evaluation"][f"H_{h}"] = {
                 "horizon_laps": h,
-                "variant_A_recursive_mae": float(np.mean(horizon_errors_A[h])) if horizon_errors_A[h] else None,
-                "variant_B_static_mae": float(np.mean(horizon_errors_B[h])) if horizon_errors_B[h] else None,
+                "models": {
+                    m: {
+                        "N": len(horizon_records[m][h]["abs_err"]),
+                        "mae_at_h": float(np.mean(horizon_records[m][h]["abs_err"])) if horizon_records[m][h]["abs_err"] else 0.0,
+                        "signed_cum_err": float(np.mean(horizon_records[m][h]["cum_err"])) if horizon_records[m][h]["cum_err"] else 0.0,
+                        "abs_cum_err": float(np.mean(np.abs(horizon_records[m][h]["cum_err"]))) if horizon_records[m][h]["cum_err"] else 0.0,
+                    }
+                    for m in horizon_records
+                },
+                "variant_A_recursive_mae": float(np.mean(horizon_records["Variant A (Recursive)"][h]["abs_err"])) if horizon_records["Variant A (Recursive)"][h]["abs_err"] else None,
+                "variant_B_static_mae": float(np.mean(horizon_records["Variant B (Unconstrained)"][h]["abs_err"])) if horizon_records["Variant B (Unconstrained)"][h]["abs_err"] else None,
             }
 
         # ── Residual Analysis Breakdown with Sample Sizes N ──
@@ -525,8 +673,10 @@ def train_and_evaluate_models(
         # Scaled Ridge
         pipe_ridge = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
         pipe_ridge.fit(X_A_tr, y_tr)
+        assert np.all(np.isfinite(X_A_te.values)), "Features matrix X_A_te contains non-finite values"
         with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
             pred_ridge = pipe_ridge.predict(X_A_te)
+        assert np.all(np.isfinite(pred_ridge)), "Scaled Ridge predictions contain non-finite values"
         cv_results["scaled_ridge"] = {
             "name": "Scaled Ridge",
             "mean_mae": float(mean_absolute_error(y_te, pred_ridge)),
@@ -590,6 +740,19 @@ def train_and_evaluate_models(
     )
     final_model_b.fit(X_B, y)
 
+    final_model_b_mono = HistGradientBoostingRegressor(
+        learning_rate=0.05,
+        max_iter=150,
+        max_depth=5,
+        l2_regularization=1.0,
+        monotonic_cst=[1, 1, 0, 0, 0, 0],
+        random_state=42,
+    )
+    final_model_b_mono.fit(X_B, y)
+
+    final_s1_slopes = fit_s1(X_B, y, fuel_effect=fuel_constant)
+    final_pipe_s2 = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))]).fit(X_B, y)
+
     # Save compact joblib artifact
     artifact_saved = False
     artifact_size_kb = 0.0
@@ -599,6 +762,9 @@ def train_and_evaluate_models(
             "model": final_model_a,
             "model_variant_a": final_model_a,
             "model_variant_b": final_model_b,
+            "model_variant_b_mono": final_model_b_mono,
+            "model_s1": {"slopes": final_s1_slopes, "fuel_effect": fuel_constant},
+            "model_s2": final_pipe_s2,
             "feature_names_A": feature_names_A,
             "feature_names_B": feature_names_B,
             "feature_names": feature_names_A,
