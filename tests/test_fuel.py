@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from config import DEFAULT_FUEL_EFFECT_SEC_PER_LAP
 from src.features.fuel import apply_fuel_correction, estimate_fuel_effect
 from src.tyre_analysis import compute_stint_degradation
 
@@ -49,7 +50,7 @@ class TestFuelEffect(unittest.TestCase):
         self.assertFalse(res["is_estimated"])
         self.assertEqual(res["source"], "default")
         self.assertEqual(res["method"], "config_default")
-        self.assertAlmostEqual(res["fuel_effect"], 0.033, places=3)
+        self.assertAlmostEqual(res["fuel_effect"], DEFAULT_FUEL_EFFECT_SEC_PER_LAP, places=3)
         self.assertIn("Insufficient", res["reason"])
 
     def test_estimate_fuel_effect_excludes_wet_compounds(self):

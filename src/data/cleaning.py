@@ -274,16 +274,19 @@ def clean_laps_with_stats(
 
     df = laps.copy()
 
-    # Track removals per driver
+    # Track removals per driver and per-lap
     driver_col = "Driver" if "Driver" in df.columns else None
     filter_counts: Dict[str, int] = defaultdict(int)
     driver_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    per_lap_reasons = pd.Series("kept", index=laps.index, dtype=object)
 
     def record_dropped(dropped_mask: pd.Series, filter_name: str) -> None:
         count = int(dropped_mask.sum())
         if count == 0:
             return
         filter_counts[filter_name] += count
+        dropped_idx = dropped_mask[dropped_mask].index
+        per_lap_reasons.loc[dropped_idx] = filter_name
         if driver_col:
             for drv, grp in df.loc[dropped_mask].groupby(driver_col):
                 driver_counts[str(drv)][filter_name] += len(grp)
@@ -366,6 +369,7 @@ def clean_laps_with_stats(
         "filter_breakdown": clean_filter_breakdown,
         "driver_breakdown": clean_driver_breakdown,
         "sufficient": final_count >= min_laps,
+        "per_lap_reasons": per_lap_reasons,
     }
 
     logger.info(
@@ -374,3 +378,15 @@ def clean_laps_with_stats(
     )
 
     return cleaned_df, stats
+
+
+def get_lap_cleaning_audit_table(laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns an audit DataFrame directly from the cleaner logging exactly one reason per dropped lap.
+    """
+    _, stats = clean_laps_with_stats(laps)
+    reasons = stats.get("per_lap_reasons", pd.Series("kept", index=laps.index))
+    audit_df = laps.copy()
+    audit_df["DropReason"] = reasons
+    audit_df["Status"] = np.where(audit_df["DropReason"] == "kept", "KEPT", "DROPPED")
+    return audit_df

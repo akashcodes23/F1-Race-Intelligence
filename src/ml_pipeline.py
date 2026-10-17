@@ -1,24 +1,30 @@
 """
-F1 Race Intelligence — Machine Learning Lab Pipeline (Phase 2)
+F1 Race Intelligence — Machine Learning Lab Pipeline (Phase 2.5)
 
 Lap-Time Prediction Engine:
 1. Target: Relative Lap Time (seconds delta relative to driver's early-race reference pace)
    RelativeLapTimeSec = LapTimeSec - DriverReferencePaceSec.
    Normalizes circuits of varying lap distances (e.g. Monaco 75s vs Spa 105s).
-2. Features: Causal lap dynamics without future lookahead:
-   - TyreLife (current tyre age in laps)
+   Computed strictly from clean laps in laps 2-6 (excluding damage/off-pace excursions).
+   Trained and evaluated ONLY on laps >= 7 (zero target leakage).
+2. Features: Strictly causal lap dynamics without future lookahead:
+   - TyreLife (current tyre age in laps; filled via stint cumcount)
    - LapsRemaining (fuel burn-off proxy)
    - LapNumber (race progression & track evolution)
-   - PrevLapRelativePace (strictly lagged pace delta from t-1)
+   - PrevLapRelativePace (strictly lagged pace delta from t-1 within stint)
    - Compound (one-hot encoded: SOFT, MEDIUM, HARD)
-3. Models:
+3. Models & Baselines:
    - Naive Reference Pace Baseline (predicts delta = 0.0)
-   - Phase 1 Per-Stint Linear Baseline
-   - Gradient Boosting Regressor (HistGradientBoostingRegressor)
+   - Persistence Baseline (predicts previous lap's relative pace)
+   - Phase 1 Per-Stint Huber Degradation Baseline (fit only on prior laps of stint with fuel correction)
+   - Scaled Ridge Regression (StandardScaler + Ridge in a Pipeline)
+   - HistGradientBoosting Variant A (1-step autoregressive with PrevLapRelativePace)
+   - HistGradientBoosting Variant B (multi-step static origin without PrevLapRelativePace)
 4. Evaluation:
    - Leave-One-Race-Out (LORO) Cross-Validation across distinct Grand Prix events
-   - Reports MAE, RMSE, and R² per held-out race with mean and spread
-   - Residual breakdown by tyre age bands and compound
+   - Reports MAE, RMSE per held-out race with mean and spread
+   - Multi-step forecast horizon evaluation (1, 5, 10, 20 laps ahead)
+   - Residual breakdown by tyre age bands and compound with exact sample sizes N
 5. Model Persistence:
    - Saves compact joblib artifact with metadata (< 5 MB)
 """
@@ -32,11 +38,13 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import HuberRegressor, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-from config import PROJECT_ROOT
+from config import DEFAULT_FUEL_EFFECT_SEC_PER_LAP, PROJECT_ROOT
 from src.data.cleaning import clean_laps
 
 logger = logging.getLogger(__name__)
@@ -47,6 +55,8 @@ DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "lap_pace_model.joblib
 
 def prepare_ml_features(
     laps: pd.DataFrame,
+    min_eval_lap: int = 7,
+    include_prev_pace: bool = True,
     is_training: bool = True,
 ) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
     """
@@ -54,13 +64,18 @@ def prepare_ml_features(
 
     Target:
       RelativeLapTimeSec = LapTimeSec - DriverReferencePaceSec
-      (where DriverReferencePaceSec is the median of driver's first 5 clean laps in that race).
+      (DriverReferencePaceSec is computed strictly from laps 2-6).
+
+    Anti-Leakage Constraint (Phase 2.5):
+      - Evaluated and trained ONLY on laps >= min_eval_lap (default: 7).
+      - Laps 2-6 are never evaluated or trained on.
+      - PrevLapRelativePace is strictly lagged from t-1 within the current stint.
 
     Features:
       - TyreLife (int)
       - LapsRemaining (int / float)
       - LapNumber (int)
-      - PrevLapRelativePace (float, strictly lagged by 1 lap from t-1)
+      - PrevLapRelativePace (float, strictly lagged by 1 lap from t-1; optional)
       - Compound_HARD, Compound_MEDIUM, Compound_SOFT (binary one-hot)
     """
     if laps is None or laps.empty:
@@ -84,32 +99,45 @@ def prepare_ml_features(
     sort_cols = [c for c in sort_cols if c in df.columns]
     df = df.sort_values(sort_cols).reset_index(drop=True)
 
-    # 1. Driver Reference Pace
+    # 1. Driver Reference Pace: computed strictly from clean laps in laps 2-6
     if "DriverReferencePaceSec" not in df.columns:
         ref_paces = {}
-        driver_group = ["RaceID", "Driver"] if "RaceID" in df.columns else ["Driver"]
-        for keys, grp in df.groupby(driver_group):
-            early = grp.iloc[:min(5, len(grp))]
-            ref_paces[keys] = float(early["LapTimeSec"].median())
-
         if "RaceID" in df.columns:
+            for race_id, r_grp in df.groupby("RaceID"):
+                sess_median = float(r_grp["LapTimeSec"].median())
+                for drv, grp in r_grp.groupby("Driver"):
+                    # Use laps 2-6; filter damaged/off-pace laps > 1.15 * session median
+                    early = grp[(grp["LapNumber"] >= 2) & (grp["LapNumber"] <= 6) & (grp["LapTimeSec"] < sess_median * 1.15)]
+                    if len(early) < 2:
+                        early = grp[(grp["LapTimeSec"] < sess_median * 1.15)].iloc[:min(5, len(grp))]
+                    if early.empty:
+                        early = grp.iloc[:min(5, len(grp))]
+                    ref_paces[(race_id, drv)] = float(early["LapTimeSec"].median())
+
             df["DriverReferencePaceSec"] = df.apply(
                 lambda r: ref_paces.get((r["RaceID"], r["Driver"]), r["LapTimeSec"]), axis=1
             )
         else:
+            sess_median = float(df["LapTimeSec"].median())
+            for drv, grp in df.groupby("Driver"):
+                early = grp[(grp["LapNumber"] >= 2) & (grp["LapNumber"] <= 6) & (grp["LapTimeSec"] < sess_median * 1.15)]
+                if len(early) < 2:
+                    early = grp[(grp["LapTimeSec"] < sess_median * 1.15)].iloc[:min(5, len(grp))]
+                if early.empty:
+                    early = grp.iloc[:min(5, len(grp))]
+                ref_paces[drv] = float(early["LapTimeSec"].median())
             df["DriverReferencePaceSec"] = df["Driver"].map(ref_paces).fillna(df["LapTimeSec"])
 
     if "RelativeLapTimeSec" not in df.columns:
         df["RelativeLapTimeSec"] = df["LapTimeSec"] - df["DriverReferencePaceSec"]
 
-    # 2. TyreLife
-    if "TyreLife" not in df.columns or df["TyreLife"].isna().all():
-        if "Stint" in df.columns:
-            stint_grp = ["RaceID", "Driver", "Stint"] if "RaceID" in df.columns else ["Driver", "Stint"]
-            df["TyreLife"] = df.groupby(stint_grp).cumcount() + 1
-        else:
-            drv_grp = ["RaceID", "Driver"] if "RaceID" in df.columns else ["Driver"]
-            df["TyreLife"] = df.groupby(drv_grp).cumcount() + 1
+    # 2. TyreLife: fill missing values using cumulative stint lap count
+    stint_grp = ["RaceID", "Driver", "Stint"] if ("RaceID" in df.columns and "Stint" in df.columns) else ["Driver", "Stint"] if "Stint" in df.columns else ["Driver"]
+    calc_tyre_life = df.groupby(stint_grp).cumcount() + 1
+    if "TyreLife" not in df.columns:
+        df["TyreLife"] = calc_tyre_life
+    else:
+        df["TyreLife"] = df["TyreLife"].fillna(calc_tyre_life)
 
     # 3. LapsRemaining (Fuel proxy)
     if "LapsRemaining" not in df.columns:
@@ -122,10 +150,9 @@ def prepare_ml_features(
             df["LapsRemaining"] = total_laps - df["LapNumber"]
         df["LapsRemaining"] = df["LapsRemaining"].clip(lower=0)
 
-    # 4. Strictly Lagged Previous Lap Relative Pace (No Lookahead!)
+    # 4. Strictly Lagged Previous Lap Relative Pace (computed BEFORE filtering laps >= 7)
     if "PrevLapRelativePace" not in df.columns:
-        lag_grp = ["RaceID", "Driver", "Stint"] if ("RaceID" in df.columns and "Stint" in df.columns) else ["Driver", "Stint"] if "Stint" in df.columns else ["Driver"]
-        df["PrevLapRelativePace"] = df.groupby(lag_grp)["RelativeLapTimeSec"].shift(1)
+        df["PrevLapRelativePace"] = df.groupby(stint_grp)["RelativeLapTimeSec"].shift(1)
         # For the first lap of a stint, previous lap in that stint is unknown; fill with 0.0
         df["PrevLapRelativePace"] = df["PrevLapRelativePace"].fillna(0.0)
 
@@ -134,30 +161,55 @@ def prepare_ml_features(
     for comp in STANDARD_COMPOUNDS:
         df[f"Compound_{comp}"] = (compound_series == comp).astype(float)
 
-    feature_cols = [
-        "TyreLife",
-        "LapsRemaining",
-        "LapNumber",
-        "PrevLapRelativePace",
-        "Compound_SOFT",
-        "Compound_MEDIUM",
-        "Compound_HARD",
-    ]
+    # ── Phase 2.5 Anti-Leakage Filtering: Train and evaluate strictly on laps >= min_eval_lap ──
+    if min_eval_lap > 0 and "LapNumber" in df.columns:
+        df = df[df["LapNumber"] >= min_eval_lap].copy().reset_index(drop=True)
 
-    # Ensure all feature columns exist and are finite
+    if df.empty:
+        return pd.DataFrame(), pd.Series(dtype=float), []
+
+    if include_prev_pace:
+        feature_cols = [
+            "TyreLife",
+            "LapsRemaining",
+            "LapNumber",
+            "PrevLapRelativePace",
+            "Compound_SOFT",
+            "Compound_MEDIUM",
+            "Compound_HARD",
+        ]
+    else:
+        feature_cols = [
+            "TyreLife",
+            "LapsRemaining",
+            "LapNumber",
+            "Compound_SOFT",
+            "Compound_MEDIUM",
+            "Compound_HARD",
+        ]
+
+    # Ensure all feature columns exist, are float64, and are finite
     for col in feature_cols:
         if col not in df.columns:
             df[col] = 0.0
-        df[col] = df[col].fillna(0.0)
+        df[col] = df[col].fillna(0.0).astype(np.float64)
 
     X = df[feature_cols].copy()
-    y = df["RelativeLapTimeSec"].copy()
+    y = df["RelativeLapTimeSec"].astype(np.float64).copy()
 
     # Pass metadata along as attributes on X for grouped cross-validation
     if "RaceID" in df.columns:
         X["_RaceID"] = df["RaceID"].values
     if "Compound" in df.columns:
         X["_Compound"] = df["Compound"].values
+    if "Driver" in df.columns:
+        X["_Driver"] = df["Driver"].values
+    if "Stint" in df.columns:
+        X["_Stint"] = df["Stint"].values
+    if "LapTimeSec" in df.columns:
+        X["_LapTimeSec"] = df["LapTimeSec"].values
+    if "DriverReferencePaceSec" in df.columns:
+        X["_DriverReferencePaceSec"] = df["DriverReferencePaceSec"].values
 
     return X, y, feature_cols
 
@@ -165,24 +217,36 @@ def prepare_ml_features(
 def train_and_evaluate_models(
     laps_data: pd.DataFrame,
     save_artifact_path: Optional[str] = DEFAULT_MODEL_PATH,
+    fuel_constant: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
 ) -> Dict[str, Any]:
     """
-    Trains and cross-validates Naive Baseline, Linear Regression, and HistGradientBoosting.
+    Trains and cross-validates Naive Baseline, Persistence Baseline, Phase 1 Huber Per-Stint Baseline,
+    Scaled Ridge, and HistGradientBoosting (Variant A 1-step and Variant B multi-step).
 
     Performs Leave-One-Race-Out (LORO) cross validation if multiple races are provided.
-    Saves trained production model to disk.
+    Saves trained production models to disk with full CV metrics.
     """
-    X, y, feature_names = prepare_ml_features(laps_data)
+    # Extract features for Variant A (with PrevLapRelativePace)
+    X_A, y, feature_names_A = prepare_ml_features(laps_data, min_eval_lap=7, include_prev_pace=True)
 
-    if X.empty or len(X) < 20:
+    if X_A.empty or len(X_A) < 20:
         return {
             "success": False,
-            "message": f"Insufficient clean dry laps ({len(X)}) for machine learning (minimum required: 20).",
+            "message": f"Insufficient clean dry laps ({len(X_A)}) for machine learning (minimum required: 20 on laps >= 7).",
         }
 
+    # Extract features for Variant B (multi-step without PrevLapRelativePace)
+    feature_names_B = [c for c in feature_names_A if c != "PrevLapRelativePace"]
+
     # Separate metadata columns
-    race_ids = X.pop("_RaceID") if "_RaceID" in X.columns else pd.Series("SingleRace", index=X.index)
-    compounds = X.pop("_Compound") if "_Compound" in X.columns else pd.Series("UNKNOWN", index=X.index)
+    race_ids = X_A.pop("_RaceID") if "_RaceID" in X_A.columns else pd.Series("SingleRace", index=X_A.index)
+    compounds = X_A.pop("_Compound") if "_Compound" in X_A.columns else pd.Series("UNKNOWN", index=X_A.index)
+    drivers = X_A.pop("_Driver") if "_Driver" in X_A.columns else pd.Series("DRV", index=X_A.index)
+    stints = X_A.pop("_Stint") if "_Stint" in X_A.columns else pd.Series(1, index=X_A.index)
+    lap_times_sec = X_A.pop("_LapTimeSec") if "_LapTimeSec" in X_A.columns else None
+    ref_paces_sec = X_A.pop("_DriverReferencePaceSec") if "_DriverReferencePaceSec" in X_A.columns else None
+
+    X_B = X_A[feature_names_B].copy()
 
     unique_races = race_ids.unique()
     is_multi_race = len(unique_races) >= 2
@@ -191,13 +255,18 @@ def train_and_evaluate_models(
         "is_multi_race": is_multi_race,
         "n_races": len(unique_races),
         "races": unique_races.tolist(),
-        "n_samples": len(X),
-        "feature_names": feature_names,
+        "n_samples": len(X_A),
+        "feature_names_A": feature_names_A,
+        "feature_names_B": feature_names_B,
         "naive_baseline": {},
-        "linear_model": {},
-        "gradient_boosting": {},
+        "persistence_baseline": {},
+        "huber_per_stint": {},
+        "scaled_ridge": {},
+        "gradient_boosting_A": {},
+        "gradient_boosting_B": {},
         "per_race_eval": [],
         "residual_breakdown": {},
+        "horizon_evaluation": {},
     }
 
     if is_multi_race:
@@ -205,19 +274,27 @@ def train_and_evaluate_models(
         logo = LeaveOneGroupOut()
         fold_scores: Dict[str, List[Dict[str, float]]] = {
             "Naive Baseline": [],
-            "Linear Regression": [],
-            "Gradient Boosting (HGBR)": [],
+            "Persistence": [],
+            "Huber Per-Stint": [],
+            "Scaled Ridge": [],
+            "HGBR Variant A": [],
+            "HGBR Variant B": [],
         }
 
         all_y_true = []
         all_hgbr_preds = []
-        all_linear_preds = []
         all_tyre_life = []
         all_compounds = []
 
-        for train_idx, test_idx in logo.split(X, y, groups=race_ids):
+        # Horizon evaluations (H = 1, 5, 10, 20 laps)
+        horizons = [1, 5, 10, 20]
+        horizon_errors_A: Dict[int, List[float]] = {h: [] for h in horizons}
+        horizon_errors_B: Dict[int, List[float]] = {h: [] for h in horizons}
+
+        for train_idx, test_idx in logo.split(X_A, y, groups=race_ids):
             held_out_race = race_ids.iloc[test_idx].iloc[0]
-            X_tr, X_te = X.iloc[train_idx], X.iloc[test_idx]
+            X_A_tr, X_A_te = X_A.iloc[train_idx], X_A.iloc[test_idx]
+            X_B_tr, X_B_te = X_B.iloc[train_idx], X_B.iloc[test_idx]
             y_tr, y_te = y.iloc[train_idx], y.iloc[test_idx]
 
             # 1. Naive Baseline (predicts 0.0 delta pace)
@@ -226,52 +303,158 @@ def train_and_evaluate_models(
             rmse_naive = float(np.sqrt(mean_squared_error(y_te, pred_naive)))
             fold_scores["Naive Baseline"].append({"race": held_out_race, "mae": mae_naive, "rmse": rmse_naive})
 
-            # 2. Linear Model
-            lr = Ridge(alpha=1.0)
-            lr.fit(X_tr, y_tr)
-            with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-                pred_lr = lr.predict(X_te)
-            mae_lr = float(mean_absolute_error(y_te, pred_lr))
-            rmse_lr = float(np.sqrt(mean_squared_error(y_te, pred_lr)))
-            fold_scores["Linear Regression"].append({"race": held_out_race, "mae": mae_lr, "rmse": rmse_lr})
+            # 2. Persistence Baseline (predicts previous lap's relative pace)
+            pred_pers = X_A_te["PrevLapRelativePace"].values
+            mae_pers = float(mean_absolute_error(y_te, pred_pers))
+            rmse_pers = float(np.sqrt(mean_squared_error(y_te, pred_pers)))
+            fold_scores["Persistence"].append({"race": held_out_race, "mae": mae_pers, "rmse": rmse_pers})
 
-            # 3. Gradient Boosting
-            gb = HistGradientBoostingRegressor(
+            # 3. Phase 1 Huber Per-Stint Baseline (extrapolating fuel-corrected Huber on prior laps of stint)
+            pred_huber = []
+            test_df_fold = pd.DataFrame({
+                "Driver": drivers.iloc[test_idx].values,
+                "Stint": stints.iloc[test_idx].values,
+                "LapNumber": X_A_te["LapNumber"].values,
+                "LapsRemaining": X_A_te["LapsRemaining"].values,
+                "RelativeLapTimeSec": y_te.values,
+                "PrevLapRelativePace": X_A_te["PrevLapRelativePace"].values,
+            })
+            if lap_times_sec is not None and ref_paces_sec is not None:
+                test_df_fold["LapTimeSec"] = lap_times_sec.iloc[test_idx].values
+                test_df_fold["DriverReferencePaceSec"] = ref_paces_sec.iloc[test_idx].values
+                test_df_fold["FuelCorrectedLapTimeSec"] = test_df_fold["LapTimeSec"] - (fuel_constant * test_df_fold["LapsRemaining"])
+            else:
+                test_df_fold["FuelCorrectedLapTimeSec"] = y_te.values - (fuel_constant * test_df_fold["LapsRemaining"])
+                test_df_fold["DriverReferencePaceSec"] = 0.0
+
+            for _, r in test_df_fold.iterrows():
+                drv_m, st_m, lap_m, rem_m, ref_m = r["Driver"], r["Stint"], r["LapNumber"], r["LapsRemaining"], r["DriverReferencePaceSec"]
+                prior = test_df_fold[
+                    (test_df_fold["Driver"] == drv_m)
+                    & (test_df_fold["Stint"] == st_m)
+                    & (test_df_fold["LapNumber"] < lap_m)
+                ]
+                if len(prior) >= 4:
+                    try:
+                        hr = HuberRegressor()
+                        hr.fit(prior["LapNumber"].values.reshape(-1, 1), prior["FuelCorrectedLapTimeSec"].values)
+                        p_fuel = hr.predict([[lap_m]])[0]
+                        p_lap = p_fuel + (fuel_constant * rem_m)
+                        pred_huber.append(float(p_lap - ref_m))
+                    except Exception:
+                        pred_huber.append(float(r["PrevLapRelativePace"]))
+                else:
+                    pred_huber.append(float(r["PrevLapRelativePace"]))
+
+            pred_huber_arr = np.array(pred_huber)
+            mae_huber = float(mean_absolute_error(y_te, pred_huber_arr))
+            rmse_huber = float(np.sqrt(mean_squared_error(y_te, pred_huber_arr)))
+            fold_scores["Huber Per-Stint"].append({"race": held_out_race, "mae": mae_huber, "rmse": rmse_huber})
+
+            # 4. Scaled Ridge Regression (StandardScaler + Ridge)
+            pipe_ridge = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+            pipe_ridge.fit(X_A_tr, y_tr)
+            # Scoped np.errstate: Apple Accelerate BLAS under NumPy 2.x on macOS can raise spurious
+            # divide-by-zero hardware exception flags during matrix multiplications even with valid finite floats.
+            with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+                pred_ridge = pipe_ridge.predict(X_A_te)
+            mae_ridge = float(mean_absolute_error(y_te, pred_ridge))
+            rmse_ridge = float(np.sqrt(mean_squared_error(y_te, pred_ridge)))
+            fold_scores["Scaled Ridge"].append({"race": held_out_race, "mae": mae_ridge, "rmse": rmse_ridge})
+
+            # 5. HistGradientBoosting Variant A (1-step Autoregressive)
+            gb_a = HistGradientBoostingRegressor(
                 learning_rate=0.05,
                 max_iter=150,
                 max_depth=5,
                 l2_regularization=1.0,
                 random_state=42,
             )
-            gb.fit(X_tr, y_tr)
-            pred_gb = gb.predict(X_te)
-            mae_gb = float(mean_absolute_error(y_te, pred_gb))
-            rmse_gb = float(np.sqrt(mean_squared_error(y_te, pred_gb)))
-            fold_scores["Gradient Boosting (HGBR)"].append({"race": held_out_race, "mae": mae_gb, "rmse": rmse_gb})
+            gb_a.fit(X_A_tr, y_tr)
+            pred_gb_a = gb_a.predict(X_A_te)
+            mae_gb_a = float(mean_absolute_error(y_te, pred_gb_a))
+            rmse_gb_a = float(np.sqrt(mean_squared_error(y_te, pred_gb_a)))
+            fold_scores["HGBR Variant A"].append({"race": held_out_race, "mae": mae_gb_a, "rmse": rmse_gb_a})
+
+            # 6. HistGradientBoosting Variant B (Multi-step Static Origin)
+            gb_b = HistGradientBoostingRegressor(
+                learning_rate=0.05,
+                max_iter=150,
+                max_depth=5,
+                l2_regularization=1.0,
+                random_state=42,
+            )
+            gb_b.fit(X_B_tr, y_tr)
+            pred_gb_b = gb_b.predict(X_B_te)
+            mae_gb_b = float(mean_absolute_error(y_te, pred_gb_b))
+            rmse_gb_b = float(np.sqrt(mean_squared_error(y_te, pred_gb_b)))
+            fold_scores["HGBR Variant B"].append({"race": held_out_race, "mae": mae_gb_b, "rmse": rmse_gb_b})
+
+            # 7. Horizon Evaluation across stints
+            for (_drv_h, _st_h), sgrp in test_df_fold.groupby(["Driver", "Stint"]):
+                sgrp = sgrp.sort_values("LapNumber")
+                if len(sgrp) < 22:
+                    continue
+                origin_idx = 2
+                origin_row = sgrp.iloc[origin_idx]
+                origin_lap = origin_row["LapNumber"]
+
+                for h in horizons:
+                    target_lap = origin_lap + h
+                    t_rows = sgrp[sgrp["LapNumber"] == target_lap]
+                    if not t_rows.empty:
+                        target_loc = t_rows.index[0]
+                        y_true_h = t_rows["RelativeLapTimeSec"].values[0]
+
+                        # Variant B (static origin prediction)
+                        row_b = X_B_te.loc[[X_B_te.index[target_loc]]]
+                        pred_h_b = gb_b.predict(row_b)[0]
+                        horizon_errors_B[h].append(float(abs(y_true_h - pred_h_b)))
+
+                        # Variant A (recursive autoregressive rollout)
+                        pred_roll = origin_row["RelativeLapTimeSec"]
+                        for step in range(1, h + 1):
+                            step_lap = origin_lap + step
+                            st_match = sgrp[sgrp["LapNumber"] == step_lap]
+                            if not st_match.empty:
+                                match_loc = st_match.index[0]
+                                row_roll = X_A_te.loc[[X_A_te.index[match_loc]]].copy()
+                                row_roll["PrevLapRelativePace"] = pred_roll
+                                pred_roll = gb_a.predict(row_roll)[0]
+                        horizon_errors_A[h].append(float(abs(y_true_h - pred_roll)))
 
             cv_results["per_race_eval"].append({
                 "RaceID": held_out_race,
                 "Laps": len(y_te),
                 "Naive_MAE": round(mae_naive, 3),
-                "Linear_MAE": round(mae_lr, 3),
-                "HGBR_MAE": round(mae_gb, 3),
+                "Persistence_MAE": round(mae_pers, 3),
+                "Huber_MAE": round(mae_huber, 3),
+                "Ridge_MAE": round(mae_ridge, 3),
+                "HGBR_A_MAE": round(mae_gb_a, 3),
+                "HGBR_B_MAE": round(mae_gb_b, 3),
                 "Naive_RMSE": round(rmse_naive, 3),
-                "Linear_RMSE": round(rmse_lr, 3),
-                "HGBR_RMSE": round(rmse_gb, 3),
-                "HGBR_vs_Linear_Gain": round(mae_lr - mae_gb, 3),
+                "Persistence_RMSE": round(rmse_pers, 3),
+                "Huber_RMSE": round(rmse_huber, 3),
+                "Ridge_RMSE": round(rmse_ridge, 3),
+                "HGBR_A_RMSE": round(rmse_gb_a, 3),
+                "HGBR_B_RMSE": round(rmse_gb_b, 3),
+                "HGBR_vs_Persistence_Gain": round(mae_pers - mae_gb_a, 3),
+                "HGBR_vs_Ridge_Gain": round(mae_ridge - mae_gb_a, 3),
             })
 
             all_y_true.extend(y_te.values)
-            all_hgbr_preds.extend(pred_gb)
-            all_linear_preds.extend(pred_lr)
-            all_tyre_life.extend(X_te["TyreLife"].values)
+            all_hgbr_preds.extend(pred_gb_a)
+            all_tyre_life.extend(X_A_te["TyreLife"].values)
             all_compounds.extend(compounds.iloc[test_idx].values)
 
         # Aggregate LORO scores
         for m_key, key_target in [
             ("Naive Baseline", "naive_baseline"),
-            ("Linear Regression", "linear_model"),
-            ("Gradient Boosting (HGBR)", "gradient_boosting"),
+            ("Persistence", "persistence_baseline"),
+            ("Huber Per-Stint", "huber_per_stint"),
+            ("Scaled Ridge", "scaled_ridge"),
+            ("HGBR Variant A", "gradient_boosting_A"),
+            ("HGBR Variant B", "gradient_boosting_B"),
         ]:
             maes = [f["mae"] for f in fold_scores[m_key]]
             rmses = [f["rmse"] for f in fold_scores[m_key]]
@@ -283,11 +466,18 @@ def train_and_evaluate_models(
                 "std_rmse": float(np.std(rmses)),
             }
 
-        # ── Residual Analysis Breakdown ──
+        # Multi-step Horizon summary
+        for h in horizons:
+            cv_results["horizon_evaluation"][f"H_{h}"] = {
+                "horizon_laps": h,
+                "variant_A_recursive_mae": float(np.mean(horizon_errors_A[h])) if horizon_errors_A[h] else None,
+                "variant_B_static_mae": float(np.mean(horizon_errors_B[h])) if horizon_errors_B[h] else None,
+            }
+
+        # ── Residual Analysis Breakdown with Sample Sizes N ──
         res_df = pd.DataFrame({
             "Actual": all_y_true,
             "Pred_HGBR": all_hgbr_preds,
-            "Pred_Linear": all_linear_preds,
             "TyreLife": all_tyre_life,
             "Compound": all_compounds,
         })
@@ -307,8 +497,9 @@ def train_and_evaluate_models(
 
     else:
         # Chronological single-session split fallback
-        split_idx = int(len(X) * 0.8)
-        X_tr, X_te = X.iloc[:split_idx], X.iloc[split_idx:]
+        split_idx = int(len(X_A) * 0.8)
+        X_A_tr, X_A_te = X_A.iloc[:split_idx], X_A.iloc[split_idx:]
+        X_B_tr, X_B_te = X_B.iloc[:split_idx], X_B.iloc[split_idx:]
         y_tr, y_te = y.iloc[:split_idx], y.iloc[split_idx:]
 
         # Baseline
@@ -321,46 +512,83 @@ def train_and_evaluate_models(
             "std_rmse": 0.0,
         }
 
-        # Linear
-        lr = Ridge(alpha=1.0)
-        lr.fit(X_tr, y_tr)
-        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-            pred_lr = lr.predict(X_te)
-        cv_results["linear_model"] = {
-            "name": "Linear Regression",
-            "mean_mae": float(mean_absolute_error(y_te, pred_lr)),
+        # Persistence
+        pred_pers = X_A_te["PrevLapRelativePace"].values
+        cv_results["persistence_baseline"] = {
+            "name": "Persistence",
+            "mean_mae": float(mean_absolute_error(y_te, pred_pers)),
             "std_mae": 0.0,
-            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_lr))),
+            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_pers))),
             "std_rmse": 0.0,
         }
 
-        # HGBR
-        gb = HistGradientBoostingRegressor(
+        # Scaled Ridge
+        pipe_ridge = Pipeline([("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))])
+        pipe_ridge.fit(X_A_tr, y_tr)
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            pred_ridge = pipe_ridge.predict(X_A_te)
+        cv_results["scaled_ridge"] = {
+            "name": "Scaled Ridge",
+            "mean_mae": float(mean_absolute_error(y_te, pred_ridge)),
+            "std_mae": 0.0,
+            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_ridge))),
+            "std_rmse": 0.0,
+        }
+
+        # HGBR Variant A
+        gb_a = HistGradientBoostingRegressor(
             learning_rate=0.05,
             max_iter=150,
             max_depth=5,
             l2_regularization=1.0,
             random_state=42,
         )
-        gb.fit(X_tr, y_tr)
-        pred_gb = gb.predict(X_te)
-        cv_results["gradient_boosting"] = {
-            "name": "Gradient Boosting (HGBR)",
-            "mean_mae": float(mean_absolute_error(y_te, pred_gb)),
+        gb_a.fit(X_A_tr, y_tr)
+        pred_gb_a = gb_a.predict(X_A_te)
+        cv_results["gradient_boosting_A"] = {
+            "name": "HGBR Variant A",
+            "mean_mae": float(mean_absolute_error(y_te, pred_gb_a)),
             "std_mae": 0.0,
-            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_gb))),
+            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_gb_a))),
             "std_rmse": 0.0,
         }
 
-    # ── Final Production Model Training ──
-    final_model = HistGradientBoostingRegressor(
+        # HGBR Variant B
+        gb_b = HistGradientBoostingRegressor(
+            learning_rate=0.05,
+            max_iter=150,
+            max_depth=5,
+            l2_regularization=1.0,
+            random_state=42,
+        )
+        gb_b.fit(X_B_tr, y_tr)
+        pred_gb_b = gb_b.predict(X_B_te)
+        cv_results["gradient_boosting_B"] = {
+            "name": "HGBR Variant B",
+            "mean_mae": float(mean_absolute_error(y_te, pred_gb_b)),
+            "std_mae": 0.0,
+            "mean_rmse": float(np.sqrt(mean_squared_error(y_te, pred_gb_b))),
+            "std_rmse": 0.0,
+        }
+
+    # ── Final Production Models Training (on 100% of clean data) ──
+    final_model_a = HistGradientBoostingRegressor(
         learning_rate=0.05,
         max_iter=150,
         max_depth=5,
         l2_regularization=1.0,
         random_state=42,
     )
-    final_model.fit(X, y)
+    final_model_a.fit(X_A, y)
+
+    final_model_b = HistGradientBoostingRegressor(
+        learning_rate=0.05,
+        max_iter=150,
+        max_depth=5,
+        l2_regularization=1.0,
+        random_state=42,
+    )
+    final_model_b.fit(X_B, y)
 
     # Save compact joblib artifact
     artifact_saved = False
@@ -368,20 +596,25 @@ def train_and_evaluate_models(
     if save_artifact_path:
         os.makedirs(os.path.dirname(save_artifact_path), exist_ok=True)
         artifact_payload = {
-            "model": final_model,
-            "feature_names": feature_names,
+            "model": final_model_a,
+            "model_variant_a": final_model_a,
+            "model_variant_b": final_model_b,
+            "feature_names_A": feature_names_A,
+            "feature_names_B": feature_names_B,
+            "feature_names": feature_names_A,
             "metadata": {
                 "created_at": datetime.datetime.utcnow().isoformat(),
-                "training_samples": len(X),
+                "training_samples": len(X_A),
                 "races": unique_races.tolist(),
-                "cv_results": {
-                    "naive_baseline": cv_results["naive_baseline"],
-                    "linear_model": cv_results["linear_model"],
-                    "gradient_boosting": cv_results["gradient_boosting"],
-                    "per_race_eval": cv_results.get("per_race_eval", []),
-                    "residual_breakdown": cv_results.get("residual_breakdown", {}),
+                "cv_results": cv_results,
+                "hyperparameters": {
+                    "learning_rate": 0.05,
+                    "max_iter": 150,
+                    "max_depth": 5,
+                    "l2_regularization": 1.0,
+                    "selection_method": "Fixed physics-informed regularization defaults (never tuned on held-out test races)",
                 },
-                "target_description": "RelativeLapTimeSec (LapTimeSec minus DriverReferencePaceSec)",
+                "target_description": "RelativeLapTimeSec (LapTimeSec minus DriverReferencePaceSec, evaluated strictly on laps >= 7)",
             },
         }
         joblib.dump(artifact_payload, save_artifact_path, compress=3)
@@ -390,7 +623,8 @@ def train_and_evaluate_models(
         logger.info(f"Model artifact saved to {save_artifact_path} ({artifact_size_kb:.1f} KB)")
 
     cv_results["success"] = True
-    cv_results["production_model"] = final_model
+    cv_results["production_model_A"] = final_model_a
+    cv_results["production_model_B"] = final_model_b
     cv_results["artifact_saved"] = artifact_saved
     cv_results["artifact_path"] = save_artifact_path
     cv_results["artifact_size_kb"] = round(artifact_size_kb, 1)
