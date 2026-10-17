@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 import pandas as pd
+from scipy.optimize import lsq_linear
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import HuberRegressor, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -248,6 +249,76 @@ def predict_s1(
             deg = slopes.get(comp, 0.04)
             preds[c_mask] = fuel_term[c_mask] + deg * X_te.loc[c_mask, "TyreLife"]
     return preds
+
+
+def fit_s1a(
+    X_tr: pd.DataFrame,
+    y_tr: pd.Series,
+    fuel_effect: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, float]]:
+    """
+    Fit S1a components on training fold:
+    1. Per-compound monotone degradation curves deg(c, age) = a1*age + a2*age^2 (monotone non-decreasing).
+    2. Compound offsets relative to MEDIUM.
+    """
+    compounds = ["SOFT", "MEDIUM", "HARD"]
+    deg_params = {}
+    offsets = {}
+
+    total_laps_proxy = X_tr["LapsRemaining"] + X_tr["LapNumber"]
+    ref_laps_rem = total_laps_proxy - 4.0
+    fuel_adj_pace = y_tr + fuel_effect * (X_tr["LapsRemaining"] - ref_laps_rem)
+
+    for c in compounds:
+        col = f"Compound_{c}"
+        if col in X_tr.columns:
+            c_mask = (X_tr[col] == 1.0)
+        else:
+            c_mask = pd.Series(True, index=X_tr.index)
+
+        if c_mask.sum() >= 20:
+            age = X_tr.loc[c_mask, "TyreLife"].values.astype(float)
+            y_sub = fuel_adj_pace[c_mask].values.astype(float)
+
+            early_mask = age <= 5
+            base = float(np.median(y_sub[early_mask])) if early_mask.sum() >= 5 else float(np.median(y_sub))
+            y_deg = np.maximum(0.0, y_sub - base)
+
+            A = np.column_stack([age, age**2])
+            res = lsq_linear(A, y_deg, bounds=(0, np.inf))
+            deg_params[c] = {"a1": float(res.x[0]), "a2": float(res.x[1]), "base": base}
+        else:
+            deg_params[c] = {"a1": 0.035, "a2": 0.0005, "base": 0.0}
+
+    med_base = deg_params.get("MEDIUM", {}).get("base", 0.0)
+    for c in compounds:
+        offsets[c] = deg_params.get(c, {}).get("base", 0.0) - med_base
+
+    return deg_params, offsets
+
+
+def calc_s1a_deg(comp: str, age: float, deg_params: Dict[str, Dict[str, float]]) -> float:
+    """Evaluate monotone quadratic degradation curve deg(c, age) = a1*age + a2*age^2."""
+    params = deg_params.get(comp.upper(), deg_params.get("MEDIUM", {"a1": 0.035, "a2": 0.0005}))
+    return float(params["a1"] * age + params["a2"] * (age**2))
+
+
+def predict_s1a_stint(
+    anchor: float,
+    comp: str,
+    ages: np.ndarray,
+    laps_rem: np.ndarray,
+    ref_laps_rem: float,
+    deg_params: Dict[str, Dict[str, float]],
+    fuel_effect: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> np.ndarray:
+    """Predict relative pace along a stint timeline anchored to current driver pace."""
+    preds = []
+    for a, rem in zip(ages, laps_rem):
+        deg = calc_s1a_deg(comp, float(a), deg_params)
+        fuel_term = -fuel_effect * (float(rem) - ref_laps_rem)
+        preds.append(anchor + fuel_term + deg)
+    return np.array(preds)
 
 
 def train_and_evaluate_models(

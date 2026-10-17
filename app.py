@@ -244,13 +244,15 @@ if current_meta:
 
 if current_laps is None or current_laps.empty:
     st.error(
-        f"🚨 **FastF1 Data Source Temporarily Unavailable:** Unable to load lap timing data for "
+        f"🚨 **FastF1 Data Source Unavailable:** Unable to load lap timing data for "
         f"`{current_meta.get('year')}` **{current_meta.get('gp')}** ({current_meta.get('session')}).\n\n"
-        "**Troubleshooting & System Status:**\n"
-        "- The upstream FastF1 data source may be temporarily unavailable or rate-limited.\n"
-        "- No events are pre-cached on the hosted app; live requests require reachable external telemetry feeds.\n"
-        "- Select another Grand Prix or Session in the sidebar and click **⚡ Load Session Data**."
+        "**Troubleshooting & Data Source Status:**\n"
+        "- Upstream Formula 1 live timing feeds require authentication credentials (HTTP 401 Unauthorized).\n"
+        "- The application includes full offline coverage for 13 Grand Prix events (2021–2023) in `data/demo/demo_laps.parquet`.\n"
+        "- Select any of the 13 supported Grand Prix events in the sidebar and click **⚡ Load Session Data**."
     )
+elif current_session is None:
+    st.caption("ℹ️ Loaded from offline demo dataset (`data/demo/demo_laps.parquet`)")
 
 # ─── Router ───────────────────────────────────────────────
 if selected_section == "🏁 Race Overview":

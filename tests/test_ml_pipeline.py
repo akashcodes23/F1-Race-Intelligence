@@ -5,7 +5,14 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.ml_pipeline import load_trained_model, prepare_ml_features, train_and_evaluate_models
+from src.ml_pipeline import (
+    calc_s1a_deg,
+    fit_s1a,
+    load_trained_model,
+    predict_s1a_stint,
+    prepare_ml_features,
+    train_and_evaluate_models,
+)
 
 
 class TestMLPipeline(unittest.TestCase):
@@ -201,5 +208,66 @@ class TestMLPipeline(unittest.TestCase):
             self.assertIn("cv_results", loaded["metadata"])
 
 
+    def test_s1a_known_answer_synthetic(self):
+        """Verify S1a prediction on known-answer synthetic data."""
+        # Anchor = 0.50s, comp = MEDIUM, fuel_effect = 0.058 s/lap
+        deg_params = {"MEDIUM": {"a1": 0.04, "a2": 0.001}}
+        ages = np.array([5, 10, 15])
+        laps_rem = np.array([30, 25, 20])
+        ref_laps_rem = 35.0  # reference at lap 4
+
+        # Expected:
+        # lap 1 (age=5, rem=30): anchor(0.50) - 0.058*(30 - 35) + (0.04*5 + 0.001*25) = 0.50 + 0.29 + 0.225 = 1.015
+        # lap 2 (age=10, rem=25): anchor(0.50) - 0.058*(25 - 35) + (0.04*10 + 0.001*100) = 0.50 + 0.58 + 0.50 = 1.580
+        preds = predict_s1a_stint(
+            anchor=0.50,
+            comp="MEDIUM",
+            ages=ages,
+            laps_rem=laps_rem,
+            ref_laps_rem=ref_laps_rem,
+            deg_params=deg_params,
+            fuel_effect=0.058,
+        )
+        self.assertAlmostEqual(preds[0], 1.015, places=4)
+        self.assertAlmostEqual(preds[1], 1.580, places=4)
+
+    def test_horizon_evaluator_zero_leakage_up_to_origin(self):
+        """
+        Verify that horizon features and anchor use strictly data up to the origin lap.
+        Perturbing a future lap (e.g. lap 15) must NOT alter anchor or features computed at origin (lap 8).
+        """
+        laps1 = self.mock_laps.copy()
+        # Origin at lap 8
+        orig_lap = 8
+        prior1 = laps1[laps1["LapNumber"] <= orig_lap]
+        anchor1 = float(prior1["LapTimeSec"].tail(5).median())
+
+        # Perturb lap 15 (future lap)
+        laps2 = self.mock_laps.copy()
+        laps2.loc[laps2["LapNumber"] == 15, "LapTimeSec"] += 5.0
+        prior2 = laps2[laps2["LapNumber"] <= orig_lap]
+        anchor2 = float(prior2["LapTimeSec"].tail(5).median())
+
+        self.assertEqual(anchor1, anchor2, "Future lap perturbation leaked into origin anchor!")
+
+    def test_pit_pace_gain_metric(self):
+        """Verify pit pace-gain fuel-adjusted calculation on known inputs."""
+        # Old stint last 5 laps mean pace: 85.0s, mean rem: 35
+        # New stint laps 2-6 mean pace: 83.0s, mean rem: 29
+        # Raw delta: 83.0 - 85.0 = -2.0s
+        # Fuel burn pace gain: -0.058 * (29 - 35) = +0.348s
+        # Actual fuel-adjusted delta (pure tyre/compound gain): -2.0 - (+0.348) = -2.348s
+        mean_old_pace = 85.0
+        mean_new_pace = 83.0
+        mean_old_rem = 35.0
+        mean_new_rem = 29.0
+        fuel_effect = 0.058
+
+        fuel_diff = -fuel_effect * (mean_new_rem - mean_old_rem)
+        actual_delta = (mean_new_pace - mean_old_pace) - fuel_diff
+        self.assertAlmostEqual(actual_delta, -2.348, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()
+

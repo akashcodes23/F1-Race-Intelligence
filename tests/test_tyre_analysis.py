@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from src.tyre_analysis import (
+    _fit_line,
     analyze_all_stints,
     compute_driver_consistency_index,
     compute_stint_degradation,
@@ -218,5 +219,23 @@ class TestTyreAnalysis(unittest.TestCase):
         self.assertIn("ConsistencyRank", consistency.columns)
 
 
+    def test_fit_line(self):
+        # Known line y = 2.5 * x + 10.0
+        x = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y = 2.5 * x + 10.0
+        fit = _fit_line(x, y)
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], 2.5, places=5)
+        self.assertAlmostEqual(fit[1], 10.0, places=5)
+
+        # Edge cases: fewer than 2 points
+        self.assertIsNone(_fit_line(np.array([1.0]), np.array([2.0])))
+        self.assertIsNone(_fit_line(np.array([]), np.array([])))
+
+        # Edge case: zero variance in x
+        self.assertIsNone(_fit_line(np.array([2.0, 2.0, 2.0]), np.array([1.0, 2.0, 3.0])))
+
+
 if __name__ == "__main__":
     unittest.main()
+
