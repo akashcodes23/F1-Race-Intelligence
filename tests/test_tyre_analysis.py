@@ -97,6 +97,55 @@ class TestTyreAnalysis(unittest.TestCase):
         print(f"\n[CLIFF DETECTOR VALIDATION] Measured False-Positive Rate: {fp_rate:.1%} ({false_positives}/{n_simulations})")
         self.assertLessEqual(fp_rate, 0.05, f"False positive rate {fp_rate:.1%} exceeds 5% threshold")
 
+    def test_cliff_detector_ar1_autocorrelated_noise(self):
+        # Test cliff detector against autocorrelated AR(1) lap time noise (rho ~ 0.5) with NO cliff
+        np.random.seed(42)
+        n_sims = 100
+        false_positives = 0
+        rho = 0.5
+        sigma = 0.05
+
+        for _ in range(n_sims):
+            x = np.arange(1, 26)
+            n = len(x)
+            eps = np.random.normal(0, sigma, n)
+            e = np.zeros(n)
+            e[0] = eps[0]
+            for t in range(1, n):
+                e[t] = rho * e[t - 1] + np.sqrt(1 - rho**2) * eps[t]
+            y = 80.0 + 0.05 * x + e
+
+            res = detect_tyre_cliff(x, y, min_cliff_lap=10, min_laps_pre=5, min_laps_post=4)
+            if res["cliff_detected"]:
+                false_positives += 1
+
+        ar1_fp_rate = false_positives / n_sims
+        print(f"\n[CLIFF DETECTOR AR(1) NOISE] False-Positive Rate: {ar1_fp_rate:.1%} ({false_positives}/{n_sims})")
+        self.assertLessEqual(ar1_fp_rate, 0.08, f"AR(1) false positive rate {ar1_fp_rate:.1%} exceeds threshold")
+
+    def test_cliff_detector_power_curve(self):
+        # Power tests: Inject cliffs of delta_s in [+0.05, +0.10, +0.20] s/lap at Lap 15
+        np.random.seed(42)
+        n_sims = 100
+        rates = {}
+
+        for delta_s in [0.05, 0.10, 0.20]:
+            detected = 0
+            for _ in range(n_sims):
+                x = np.arange(1, 26)
+                noise = np.random.normal(0, 0.05, len(x))
+                y = 80.0 + np.where(x <= 15, 0.04 * x, 0.04 * 15 + (0.04 + delta_s) * (x - 15)) + noise
+                res = detect_tyre_cliff(x, y, min_cliff_lap=10, min_laps_pre=5, min_laps_post=4)
+                if res["cliff_detected"] and 13 <= res["cliff_lap"] <= 17:
+                    detected += 1
+            rates[delta_s] = detected / n_sims
+
+        print(f"\n[CLIFF DETECTOR POWER TESTS] Detection rates: {rates}")
+        # Verify sensitivity increases monotonically with cliff severity
+        self.assertGreaterEqual(rates[0.05], 0.70)
+        self.assertGreaterEqual(rates[0.10], 0.90)
+        self.assertGreaterEqual(rates[0.20], 0.98)
+
     def test_analyze_all_stints(self):
         stint2 = pd.DataFrame({
             "Driver": ["LEC"] * 15,

@@ -244,11 +244,11 @@ if current_meta:
 
 if current_laps is None or current_laps.empty:
     st.error(
-        f"🚨 **FastF1 API Unreachable or Session Unavailable:** Unable to load lap timing data for "
+        f"🚨 **FastF1 Data Source Temporarily Unavailable:** Unable to load lap timing data for "
         f"`{current_meta.get('year')}` **{current_meta.get('gp')}** ({current_meta.get('session')}).\n\n"
-        "**Troubleshooting:**\n"
-        "- Verify your network connection to the FastF1 / Ergast timing servers.\n"
-        "- If running in an offline environment (cold cache), choose a pre-cached event (e.g. 2023 Monaco Grand Prix).\n"
+        "**Troubleshooting & System Status:**\n"
+        "- The upstream FastF1 data source may be temporarily unavailable or rate-limited.\n"
+        "- No events are pre-cached on the hosted app; live requests require reachable external telemetry feeds.\n"
         "- Select another Grand Prix or Session in the sidebar and click **⚡ Load Session Data**."
     )
 
