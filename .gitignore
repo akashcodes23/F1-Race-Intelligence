@@ -25,3 +25,7 @@ cache/
 
 # Logs
 *.log
+
+# Datasets
+*.parquet
+data/*.parquet
