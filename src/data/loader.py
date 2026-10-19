@@ -22,6 +22,42 @@ def init_cache(cache_dir: str) -> None:
     logger.info(f"FastF1 cache enabled: {cache_dir}")
 
 
+DEMO_PARQUET_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data",
+    "demo",
+    "demo_laps.parquet",
+)
+
+
+def get_demo_races() -> List[Tuple[int, str]]:
+    """Return list of (year, grand_prix) available in the offline demo dataset."""
+    if os.path.exists(DEMO_PARQUET_PATH):
+        try:
+            df = pd.read_parquet(DEMO_PARQUET_PATH, columns=["Year", "GrandPrix"])
+            pairs = df.drop_duplicates().sort_values(["Year", "GrandPrix"])
+            return list(zip(pairs["Year"].astype(int), pairs["GrandPrix"].astype(str)))
+        except Exception as e:
+            logger.error(f"Failed to read demo dataset: {e}")
+    return []
+
+
+def load_demo_laps(year: int, gp: str) -> Optional[pd.DataFrame]:
+    """Load cleaned laps from the offline demo dataset for year and gp."""
+    if not os.path.exists(DEMO_PARQUET_PATH):
+        return None
+    try:
+        df = pd.read_parquet(DEMO_PARQUET_PATH)
+        gp_clean = gp.lower().replace("grand prix", "").strip()
+        matched = df[(df["Year"] == year) & (df["GrandPrix"].str.lower().str.contains(gp_clean))]
+        if not matched.empty:
+            logger.info(f"Loaded {len(matched)} laps from offline demo dataset for {year} {gp}")
+            return matched.copy()
+    except Exception as e:
+        logger.error(f"Failed to load demo laps for {year} {gp}: {e}")
+    return None
+
+
 def get_event_schedule(year: int) -> pd.DataFrame:
     """
     Return the official event schedule for *year*, excluding pre-season testing.
@@ -43,9 +79,15 @@ def get_event_schedule(year: int) -> pd.DataFrame:
 def get_event_names(year: int) -> List[str]:
     """Return a list of Grand Prix names for *year*."""
     schedule = get_event_schedule(year)
-    if schedule.empty or "EventName" not in schedule.columns:
-        return []
-    return schedule["EventName"].tolist()
+    if not schedule.empty and "EventName" in schedule.columns:
+        return schedule["EventName"].tolist()
+
+    # Fallback to demo races if live schedule discovery fails or is offline
+    demo_races = get_demo_races()
+    matched = [gp for (y, gp) in demo_races if y == year]
+    if matched:
+        return matched
+    return []
 
 
 def get_available_sessions(year: int, gp: str) -> Dict[str, int]:
@@ -71,9 +113,11 @@ def load_session(
     gp: str,
     session_identifier,
     load_telemetry: bool = False,
+    fallback_to_demo: bool = True,
 ) -> Tuple[Optional[object], Optional[pd.DataFrame]]:
     """
     Load a FastF1 session with laps and optional high-frequency telemetry.
+    If live loading fails and fallback_to_demo is True, attempts to load from offline demo dataset.
     """
     try:
         session = fastf1.get_session(year, gp, session_identifier)
@@ -87,6 +131,10 @@ def load_session(
         laps = session.laps
         if laps is None or len(laps) == 0:
             logger.warning(f"No lap data: {year} {gp} session {session_identifier}")
+            if fallback_to_demo:
+                demo_laps = load_demo_laps(year, gp)
+                if demo_laps is not None and not demo_laps.empty:
+                    return session, demo_laps
             return session, pd.DataFrame()
 
         # Guarantee LapTimeSec float column
@@ -98,6 +146,10 @@ def load_session(
 
     except Exception as e:
         logger.error(f"Session load failed ({year} {gp} {session_identifier}): {e}")
+        if fallback_to_demo:
+            demo_laps = load_demo_laps(year, gp)
+            if demo_laps is not None and not demo_laps.empty:
+                return None, demo_laps
         return None, None
 
 

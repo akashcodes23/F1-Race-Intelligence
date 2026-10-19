@@ -6,11 +6,13 @@ Re-exports from src.data.loader.
 
 from src.data.loader import (
     get_available_sessions,
+    get_demo_races,
     get_driver_laps,
     get_event_names,
     get_event_schedule,
     get_session_drivers,
     init_cache,
+    load_demo_laps,
     load_session,
 )
 
@@ -22,4 +24,6 @@ __all__ = [
     "load_session",
     "get_session_drivers",
     "get_driver_laps",
+    "get_demo_races",
+    "load_demo_laps",
 ]

@@ -21,9 +21,9 @@
    - Sector-by-sector analysis (S1, S2, S3 bests) and hypothetical optimal lap times.
 
 3. **🛞 Tyre Intelligence & Degradation Modeling**
-   - Per-stint Ordinary Least Squares (OLS) degradation regression ($s / \text{lap}$).
-   - Goodness of fit ($R^2$) reporting and sample size validation.
-   - Compound benchmarking (Soft vs Medium vs Hard vs Inters vs Wets).
+   - Per-stint Robust Huber degradation regression ($s / \text{lap}$) with fuel-burn mass correction.
+   - 95% Confidence Intervals (standard and HAC autocorrelation-consistent).
+   - Monotone compound benchmarking and change-point tyre cliff detection.
 
 4. **⚡ High-Frequency Telemetry Lab**
    - Millisecond-aligned Speed (km/h), Throttle %, and Brake traces.
@@ -36,13 +36,13 @@
    - Sensitivity matrix testing pit loss variance (Standard vs VSC / Safety Car).
 
 6. **🧠 Machine Learning Lab**
-   - Strictly chronological train/test splits (zero time-series data leakage).
-   - Mean Baseline comparator vs Linear Regression and Random Forest Regressors.
-   - TimeSeriesSplit cross-validation, prediction vs actual traces, residual diagnostics, and feature importance.
+   - Zero-leakage chronological and Leave-One-Race-Out (LORO) cross-validation across 13 Grand Prix events.
+   - Anchored Physics Model ($S_1a$) and HistGradientBoostingRegressor benchmarked against persistence baselines.
+   - Multi-origin horizon forecasting ($H \in \{1, 5, 10, 20\}$) and pit pace-gain accuracy diagnostics.
 
-7. **📅 Season Explorer**
-   - Dynamic race calendar discovery for FIA Formula One World Championship seasons.
-   - Round metadata and session formats (Practice, Qualifying, Sprint, Race).
+7. **📦 Built-in Offline Demo Mode**
+   - Offline bundled demo dataset (`data/demo/demo_laps.parquet`, 0.79 MB) containing 12,012 clean laps across 13 Grand Prix events.
+   - Runs seamlessly without live network access or FastF1 live timing dependencies.
 
 ---
 

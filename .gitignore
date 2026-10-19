@@ -25,3 +25,11 @@ cache/
 
 # Logs
 *.log
+
+# Datasets
+*.parquet
+data/*.parquet
+!data/demo/*.parquet
+
+# Scratch
+scratch/

@@ -69,12 +69,14 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
     ])
 
     with tab1:
-        st.markdown(f"**Detailed Stint OLS vs Huber Fits — {selected_driver}**")
+        st.markdown(f"**Detailed Stint Huber Regressions & Cliff Diagnostics — {selected_driver}**")
         all_stints = analyze_all_stints(drv_laps, fuel_effect=fuel_val, use_fuel_correction=use_fuel_corr)
         if not all_stints.empty:
             st.dataframe(all_stints, use_container_width=True, hide_index=True)
+            if (all_stints["LapsAnalyzed"] < 8).any():
+                st.caption("⚠️ **Low Sample Stints (N < 8 laps)**: Stints with fewer than 8 clean laps have wider uncertainty bands; slopes should be interpreted with caution.")
         else:
-            st.info("Insufficient clean laps within individual stints for robust regression fitting.")
+            st.info("Insufficient clean laps within individual stints for robust regression fitting (minimum 5 clean laps required).")
 
     with tab2:
         st.markdown("**Driver Consistency Index (Robust MAD) & Session Pace Ranking**")

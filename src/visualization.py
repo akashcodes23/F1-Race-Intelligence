@@ -436,68 +436,63 @@ def stint_strategy_chart(stint_df: pd.DataFrame) -> go.Figure:
 
 def telemetry_overlay_plot(aligned_tel: pd.DataFrame, driver1: str, driver2: str) -> go.Figure:
     """
-    Multi-trace telemetry comparison: Speed overlay + Speed delta, Throttle %, Brake %.
+    Multi-trace telemetry comparison: dynamically display only channels
+    actually provided in the aligned telemetry data.
     """
     if aligned_tel is None or aligned_tel.empty:
         fig = go.Figure()
         fig.add_annotation(text="Telemetry data unavailable for this lap", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
         return apply_chart_theme(fig, "Telemetry Overlay (No Data)")
 
+    # Identify which channels are present
+    channel_specs = []
+    if "Speed_1" in aligned_tel.columns or "Speed_2" in aligned_tel.columns:
+        channel_specs.append(("Speed", f"Speed Profile (km/h) [+{driver1} / −{driver2}]", "km/h", 2.0))
+    if "Throttle_1" in aligned_tel.columns or "Throttle_2" in aligned_tel.columns:
+        channel_specs.append(("Throttle", "Throttle Application (%)", "Throttle %", 1.5))
+    if "Brake_1" in aligned_tel.columns or "Brake_2" in aligned_tel.columns:
+        channel_specs.append(("Brake", "Braking Application", "Brake On/Off", 1.5))
+    if "nGear_1" in aligned_tel.columns or "nGear_2" in aligned_tel.columns:
+        channel_specs.append(("nGear", "Selected Gear", "Gear", 1.5))
+    if "RPM_1" in aligned_tel.columns or "RPM_2" in aligned_tel.columns:
+        channel_specs.append(("RPM", "Engine RPM", "RPM", 1.5))
+
+    if not channel_specs:
+        fig = go.Figure()
+        fig.add_annotation(text="No valid telemetry channels found", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return apply_chart_theme(fig, "Telemetry Overlay (No Channels)")
+
+    n_channels = len(channel_specs)
+    row_heights = [0.45] + [0.55 / max(1, n_channels - 1)] * (n_channels - 1) if n_channels > 1 else [1.0]
+
     fig = make_subplots(
-        rows=3, cols=1,
+        rows=n_channels, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.06,
-        subplot_titles=(
-            f"Speed Profile (km/h) & Delta [+{driver1} / −{driver2}]",
-            "Throttle Application (%)",
-            "Braking Application",
-        ),
-        row_heights=[0.5, 0.25, 0.25],
+        subplot_titles=[spec[1] for spec in channel_specs],
+        row_heights=row_heights,
     )
 
     dist = aligned_tel["Distance"]
 
-    # Speed
-    if "Speed_1" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Speed_1"], name=f"{driver1} Speed", line=dict(color=CHART_ACCENT, width=2)),
-            row=1, col=1,
-        )
-    if "Speed_2" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Speed_2"], name=f"{driver2} Speed", line=dict(color=CHART_ACCENT_SECONDARY, width=2)),
-            row=1, col=1,
-        )
+    for row_idx, (ch_name, _, y_label, l_width) in enumerate(channel_specs, start=1):
+        col1 = f"{ch_name}_1"
+        col2 = f"{ch_name}_2"
+        if col1 in aligned_tel.columns and not aligned_tel[col1].isna().all():
+            fig.add_trace(
+                go.Scatter(x=dist, y=aligned_tel[col1], name=f"{driver1} {ch_name}", line=dict(color=CHART_ACCENT, width=l_width)),
+                row=row_idx, col=1,
+            )
+        if col2 in aligned_tel.columns and not aligned_tel[col2].isna().all():
+            fig.add_trace(
+                go.Scatter(x=dist, y=aligned_tel[col2], name=f"{driver2} {ch_name}", line=dict(color=CHART_ACCENT_SECONDARY, width=l_width)),
+                row=row_idx, col=1,
+            )
+        fig.update_yaxes(title_text=y_label, row=row_idx, col=1)
 
-    # Throttle
-    if "Throttle_1" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Throttle_1"], name=f"{driver1} Throttle", line=dict(color=CHART_ACCENT, width=1.5)),
-            row=2, col=1,
-        )
-    if "Throttle_2" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Throttle_2"], name=f"{driver2} Throttle", line=dict(color=CHART_ACCENT_SECONDARY, width=1.5)),
-            row=2, col=1,
-        )
-
-    # Brake
-    if "Brake_1" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Brake_1"], name=f"{driver1} Brake", line=dict(color=CHART_ACCENT, width=1.5)),
-            row=3, col=1,
-        )
-    if "Brake_2" in aligned_tel.columns:
-        fig.add_trace(
-            go.Scatter(x=dist, y=aligned_tel["Brake_2"], name=f"{driver2} Brake", line=dict(color=CHART_ACCENT_SECONDARY, width=1.5)),
-            row=3, col=1,
-        )
-
-    fig = apply_chart_theme(fig, f"Telemetry Overlay: {driver1} vs {driver2}", height=650)
-    fig.update_xaxes(title_text="Lap Distance (meters)", row=3, col=1)
-    fig.update_yaxes(title_text="km/h", row=1, col=1)
-    fig.update_yaxes(title_text="Throttle %", row=2, col=1)
-    fig.update_yaxes(title_text="Brake On/Off", row=3, col=1)
+    chart_height = max(400, 220 * n_channels)
+    fig = apply_chart_theme(fig, f"Telemetry Overlay: {driver1} vs {driver2}", height=chart_height)
+    fig.update_xaxes(title_text="Lap Distance (meters)", row=n_channels, col=1)
     return fig
 
 

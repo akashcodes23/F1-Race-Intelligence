@@ -13,7 +13,7 @@ Analytical Engine:
 """
 
 import logging
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,24 @@ logger = logging.getLogger(__name__)
 WET_COMPOUNDS: Set[str] = {"INTERMEDIATE", "WET"}
 
 
+def _fit_line(lx: np.ndarray, ly: np.ndarray) -> Optional[np.ndarray]:
+    """
+    Closed-form ordinary least squares linear regression returning np.array([slope, intercept]).
+    Returns None if fewer than 2 points or if x-variance is zero.
+    """
+    if lx is None or ly is None or len(lx) < 2 or len(ly) < 2:
+        return None
+    lx = np.asarray(lx, dtype=float)
+    ly = np.asarray(ly, dtype=float)
+    xm, ym = float(np.mean(lx)), float(np.mean(ly))
+    ss_x = float(np.sum((lx - xm) ** 2))
+    if ss_x <= 1e-12:
+        return None
+    slp = float(np.sum((lx - xm) * (ly - ym)) / ss_x)
+    icept = ym - slp * xm
+    return np.array([slp, icept])
+
+
 def detect_tyre_cliff(
     x: np.ndarray,
     y: np.ndarray,
@@ -45,6 +63,7 @@ def detect_tyre_cliff(
     min_laps_post: int = CLIFF_MIN_LAPS_POST,
     min_slope_delta: float = 0.04,
     min_err_drop: float = 0.15,
+    f_stat_threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Two-stage segmented change-point detector for tyre performance cliffs.
@@ -55,6 +74,7 @@ def detect_tyre_cliff(
       - Requires at least min_laps_post laps after knot (default 4).
       - Post-cliff slope must exceed slope_multiplier * pre_cliff_slope AND (post - pre) >= min_slope_delta.
       - Sum of squared error must drop by >= min_err_drop (15%).
+      - Optional formal F-test vs single linear fit: F = ((SS_single - SS_two)/2) / (SS_two/(n-4)) >= f_stat_threshold.
     """
     no_cliff = {
         "cliff_detected": False,
@@ -75,8 +95,10 @@ def detect_tyre_cliff(
     if n < min_laps_pre + min_laps_post:
         return no_cliff
 
-    single_fit = np.polyfit(x, y, 1)
-    single_err = float(np.sum((y - np.poly1d(single_fit)(x)) ** 2))
+    single_fit = _fit_line(x, y)
+    if single_fit is None:
+        return no_cliff
+    single_err = float(np.sum((y - (single_fit[0] * x + single_fit[1])) ** 2))
     if single_err <= 1e-6:
         return no_cliff
 
@@ -95,18 +117,28 @@ def detect_tyre_cliff(
         if mask1.sum() < min_laps_pre or mask2.sum() < min_laps_post:
             continue
 
-        p1 = np.polyfit(x[mask1], y[mask1], 1)
-        p2 = np.polyfit(x[mask2], y[mask2], 1)
+        p1 = _fit_line(x[mask1], y[mask1])
+        p2 = _fit_line(x[mask2], y[mask2])
+        if p1 is None or p2 is None:
+            continue
 
         two_err = float(
-            np.sum((y[mask1] - np.poly1d(p1)(x[mask1])) ** 2)
-            + np.sum((y[mask2] - np.poly1d(p2)(x[mask2])) ** 2)
+            np.sum((y[mask1] - (p1[0] * x[mask1] + p1[1])) ** 2)
+            + np.sum((y[mask2] - (p2[0] * x[mask2] + p2[1])) ** 2)
         )
         err_drop = (single_err - two_err) / single_err
 
         # Check for meaningful slope acceleration and error drop
         slope_accel = p2[0] > (slope_multiplier * max(p1[0], 0.01))
         meaningful_delta = (p2[0] - p1[0]) >= min_slope_delta
+
+        if f_stat_threshold is not None:
+            df2 = n - 4
+            if df2 <= 0 or two_err <= 1e-12:
+                continue
+            f_stat = ((single_err - two_err) / 2.0) / (two_err / df2)
+            if f_stat < f_stat_threshold:
+                continue
 
         if slope_accel and meaningful_delta and err_drop > min_err_drop:
             if err_drop > best_err_drop:

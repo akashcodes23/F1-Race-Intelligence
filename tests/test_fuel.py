@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from config import DEFAULT_FUEL_EFFECT_SEC_PER_LAP
 from src.features.fuel import apply_fuel_correction, estimate_fuel_effect
 from src.tyre_analysis import compute_stint_degradation
 
@@ -49,7 +50,7 @@ class TestFuelEffect(unittest.TestCase):
         self.assertFalse(res["is_estimated"])
         self.assertEqual(res["source"], "default")
         self.assertEqual(res["method"], "config_default")
-        self.assertAlmostEqual(res["fuel_effect"], 0.033, places=3)
+        self.assertAlmostEqual(res["fuel_effect"], DEFAULT_FUEL_EFFECT_SEC_PER_LAP, places=3)
         self.assertIn("Insufficient", res["reason"])
 
     def test_estimate_fuel_effect_excludes_wet_compounds(self):
@@ -122,8 +123,40 @@ class TestFuelEffect(unittest.TestCase):
             drivers_data.extend([s1, s2])
         laps = pd.concat(drivers_data, ignore_index=True)
         res = estimate_fuel_effect(laps, min_bound=0.02, max_bound=0.05)
-        self.assertEqual(res["source"], "default")
+        self.assertEqual(res["source"], "out_of_bounds")
+        self.assertTrue(res["is_out_of_bounds"])
         self.assertIn("outside plausible bounds", res["reason"])
+
+    def test_fuel_out_of_bounds_exclusion(self):
+        # Explicit test for out-of-bounds exclusion
+        # When fuel effect calculation yields negative or abnormally high values,
+        # it must be marked out_of_bounds and excluded from adoption (falling back to config default).
+        drivers_data = []
+        for d in ["HAM", "RUS"]:
+            s1 = pd.DataFrame({
+                "Driver": [d] * 8,
+                "Stint": [1] * 8,
+                "Compound": ["HARD"] * 8,
+                "LapNumber": list(range(2, 10)),
+                "LapTimeSec": [85.0 for _ in range(8)],
+                "TyreLife": list(range(1, 9)),
+            })
+            s2 = pd.DataFrame({
+                "Driver": [d] * 8,
+                "Stint": [2] * 8,
+                "Compound": ["HARD"] * 8,
+                "LapNumber": list(range(25, 33)),
+                # Negative pace change: laps get SLOWER by 2s (fuel effect would be negative)
+                "LapTimeSec": [87.0 for _ in range(8)],
+                "TyreLife": list(range(1, 9)),
+            })
+            drivers_data.extend([s1, s2])
+        laps = pd.concat(drivers_data, ignore_index=True)
+        res = estimate_fuel_effect(laps, min_bound=0.02, max_bound=0.08)
+        self.assertEqual(res["source"], "out_of_bounds")
+        self.assertTrue(res["is_out_of_bounds"])
+        self.assertFalse(res["is_estimated"])
+        self.assertEqual(res["fuel_effect"], DEFAULT_FUEL_EFFECT_SEC_PER_LAP)
 
     def test_estimate_fuel_effect_successful_estimation(self):
         # 2 drivers with 2 matched dry stints where pace gain is realistic (~0.035 s/lap)

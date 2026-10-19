@@ -27,9 +27,9 @@ TEST_SIZE = 0.2
 
 # ─── Strategy & Race Physics ──────────────────────────────
 DEFAULT_PIT_LOSS_SECONDS = 22.0
-DEFAULT_FUEL_EFFECT_SEC_PER_LAP = 0.033  # Nominal fuel burn pace gain (seconds per lap)
+DEFAULT_FUEL_EFFECT_SEC_PER_LAP = 0.058  # Pooled median (0.0587 s/lap) across 64 compound-matched dry stint pairs (races >= 3 pairs)
 MIN_FUEL_EFFECT_BOUND = 0.02             # Configurable plausible range minimum (default 0.02 s/lap)
-MAX_FUEL_EFFECT_BOUND = 0.05             # Configurable plausible range maximum (default 0.05 s/lap)
+MAX_FUEL_EFFECT_BOUND = 0.08             # Configurable plausible range maximum (default 0.08 s/lap)
 
 # ─── Outlier Filtering (MAD Residuals) ───────────────────
 OUTLIER_MAD_K = 3.5                       # Configurable robust MAD multiplier for stint residuals
