@@ -88,7 +88,28 @@ def verify_offline_app():
     assert len(mc_res.pit_window_options) > 0, "Stop timing evaluation failed"
     print(f"  Regulation Check: Legal={mc_res.is_legal_strategy} ({mc_res.rule_disclaimer})")
 
-    print("\nSUCCESS: All 13 races loaded and main analytics pages render with network strictly blocked!")
+    # Page 4 logic: 3D Spatial Track Engine & WebGL compilation
+    from src.visualization.track_3d import Track3DEngine
+    track_eng = Track3DEngine("Monaco Grand Prix", elevation_scale=2.0)
+    assert len(track_eng.track_df) == 800, "Track spline interpolation failed"
+    cars_3d = track_eng.interpolate_car_positions([
+        {"driver": "VER", "position": 1, "team": "Red Bull Racing", "gap_to_lead_s": 0.0},
+        {"driver": "ALO", "position": 2, "team": "Aston Martin", "gap_to_lead_s": 1.25},
+    ], lap_progress=0.45)
+    assert len(cars_3d) == 2, "Car interpolation failed"
+    html_3d = track_eng.generate_threejs_html(cars_3d, height=500)
+    assert "three.min.js" in html_3d and "VER" in html_3d, "Three.js compilation failed"
+    print(f"  3D Spatial Engine: Monaco 3D Track compiled ({len(track_eng.track_df)} vertices, 2 cars interpolated).")
+
+    # Page 5 logic: Reconstructed Offline Telemetry
+    from pages.telemetry_lab import compute_corner_apex_speeds, reconstruct_offline_telemetry
+    rec_tel = reconstruct_offline_telemetry("Monaco Grand Prix", "VER", ver_laps)
+    assert len(rec_tel) > 100, "Offline telemetry reconstruction failed"
+    apexes = compute_corner_apex_speeds(rec_tel)
+    print(f"  Telemetry Lab: Reconstructed {len(rec_tel)} telemetry points with {len(apexes)} corner apexes offline.")
+
+    print("\nSUCCESS: All 13 races loaded, 3D WebGL engine compiled, and analytics render with network strictly blocked!")
+
 
 if __name__ == "__main__":
     verify_offline_app()

@@ -24,6 +24,7 @@ from pages.driver_comparison import render_driver_comparison
 from pages.ml_lab import render_ml_lab
 
 # Import Pages
+from pages.race_cockpit import render_race_cockpit
 from pages.race_overview import render_race_overview
 from pages.season_explorer import render_season_explorer
 from pages.strategy_simulator import render_strategy_simulator
@@ -36,6 +37,7 @@ from src.data_loader import (
     init_cache,
     load_session,
 )
+from src.visualization.audio import render_audio_controller
 
 # Initialize FastF1 Cache (Single point of initialization)
 init_cache(CACHE_DIR)
@@ -280,14 +282,18 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
+# Audio Controls
+render_audio_controller()
+
 # ─── Navigation Header ────────────────────────────────────
 sections = [
+    "🏎️ Pit-Wall Cockpit",
     "🏁 Race Overview",
     "⚔️ Driver Comparison",
     "🛞 Tyre Intelligence",
     "⚡ Telemetry Lab",
     "⏱️ Strategy Simulator",
-    "🧠 ML Lab",
+    "🧠 ML Lab & Validation",
     "📅 Season Explorer",
 ]
 
@@ -319,7 +325,10 @@ elif current_session is None:
     st.caption("ℹ️ Loaded from offline demo dataset (`data/demo/demo_laps.parquet`)")
 
 # ─── Router ───────────────────────────────────────────────
-if selected_section == "🏁 Race Overview":
+if selected_section == "🏎️ Pit-Wall Cockpit":
+    render_race_cockpit(current_session, current_laps, current_meta)
+
+elif selected_section == "🏁 Race Overview":
     render_race_overview(current_session, current_laps)
 
 elif selected_section == "⚔️ Driver Comparison":
@@ -334,7 +343,7 @@ elif selected_section == "⚡ Telemetry Lab":
 elif selected_section == "⏱️ Strategy Simulator":
     render_strategy_simulator(current_laps)
 
-elif selected_section == "🧠 ML Lab":
+elif selected_section == "🧠 ML Lab & Validation":
     render_ml_lab(current_laps)
 
 elif selected_section == "📅 Season Explorer":
