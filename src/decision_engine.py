@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from config import DEFAULT_FUEL_EFFECT_SEC_PER_LAP
+from src.features.fuel import normalize_lap_fuel
 
 # Empirical circuit pit losses estimated from clean race data across 13 Grand Prix events
 CIRCUIT_PIT_LOSSES: Dict[str, Dict[str, Any]] = {
@@ -76,10 +77,11 @@ def compute_stay_out_anchor(recent_laps: pd.DataFrame, fuel_effect: float = DEFA
     clean = recent_laps.dropna(subset=["LapTimeSec"]).tail(5).copy()
     if clean.empty:
         return 80.0
-    current_lap = clean["LapNumber"].max()
-    # Fuel adjustment: normalize past laps to current lap fuel mass
-    # Lap k was run with more fuel, so it was slower by fuel_effect * (current_lap - k)
-    adj_pace = clean["LapTimeSec"] - fuel_effect * (current_lap - clean["LapNumber"])
+    current_lap = float(clean["LapNumber"].max())
+    # Fuel adjustment: normalize past laps to current lap fuel mass using canonical helper
+    adj_pace = normalize_lap_fuel(
+        clean["LapTimeSec"], clean["LapNumber"], reference_lap=current_lap, fuel_effect_sec_per_lap=fuel_effect
+    )
     return float(np.median(adj_pace))
 
 
@@ -125,40 +127,40 @@ def compute_empirical_trend(
     return round(raw_slope, 4), round(shrunk_slope, 4)
 
 
+EMPIRICAL_PAIR_DELTAS: Dict[Tuple[str, str], Tuple[float, float]] = {
+    ("HARD", "HARD"): (-0.516, 0.562),
+    ("HARD", "MEDIUM"): (-0.861, 0.871),
+    ("HARD", "SOFT"): (-0.586, 0.540),
+    ("MEDIUM", "HARD"): (-0.445, 0.666),
+    ("MEDIUM", "MEDIUM"): (-0.950, 0.789),
+    ("MEDIUM", "SOFT"): (-1.032, 0.691),
+    ("SOFT", "HARD"): (-0.366, 0.490),
+    ("SOFT", "MEDIUM"): (-0.791, 0.660),
+    ("SOFT", "SOFT"): (-1.222, 0.773),
+}
+
+
 def predict_pit_pace_gain(
     compound_pre: str,
     compound_post: str,
-    old_tyre_age: float,
+    old_tyre_age: float = 20.0,
 ) -> Tuple[float, float]:
     """
-    Predict fuel-adjusted pace gain after stop:
-    delta = compound_offset(post vs pre) + [deg(post, 3.5) - deg(pre, old_age)].
+    Predict fuel-adjusted pace gain after pit stop using empirical per-compound-pair medians.
+    Per Phase 3A.1 evaluation, empirical per-pair medians outperform S1a (0.532s MAE vs 0.687s).
     Returns (predicted_delta, residual_sigma).
     Negative delta means driver is FASTER after the pit stop.
     """
-    offsets = {"SOFT": -1.4067, "MEDIUM": 0.0, "HARD": 0.0342}
-    deg_rates = {"SOFT": 0.1310, "MEDIUM": 0.0484, "HARD": 0.0217}
-
     c_pre = str(compound_pre).upper()
     c_post = str(compound_post).upper()
+    key = (c_pre, c_post)
 
-    c_off = offsets.get(c_post, 0.0) - offsets.get(c_pre, 0.0)
-    deg_post = deg_rates.get(c_post, 0.0484) * 3.5
-    deg_pre = deg_rates.get(c_pre, 0.0484) * float(old_tyre_age)
-
-    pred_delta = c_off + (deg_post - deg_pre)
-
-    # Empirical out-of-fold sigma stratified by old tyre age
-    if c_pre == c_post and old_tyre_age < 5:
-        sigma = 0.25
-    elif old_tyre_age < 15:
-        sigma = 1.05
-    elif old_tyre_age <= 25:
-        sigma = 1.25
+    if key in EMPIRICAL_PAIR_DELTAS:
+        med, sig = EMPIRICAL_PAIR_DELTAS[key]
     else:
-        sigma = 0.95
+        med, sig = (-0.737, 0.723)
 
-    return round(float(pred_delta), 3), sigma
+    return round(float(med), 3), round(float(sig), 3)
 
 
 def run_monte_carlo_decision(
@@ -346,24 +348,26 @@ def evaluate_undercut_overcut(
         deltas.append(net_pos)
 
     deltas = np.array(deltas)
-    prob_success = float(np.mean(deltas > 0))
     expected_margin = float(np.mean(deltas))
     ci_80_low = float(np.percentile(deltas, 10.0))
     ci_80_high = float(np.percentile(deltas, 90.0))
 
+    # Phase 3A.1 Policy: Undercut Brier skill is not > 0 on held-out races (Brier skill = -19.98).
+    # Engine returns margin intervals only, with NO point win probability.
     if ci_80_low <= 0.0 <= ci_80_high:
         verdict = "INCONCLUSIVE"
-        rec = f"Undercut margin 80% CI [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] includes zero; success is uncertain."
+        rec = f"Undercut margin 80% CI [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] includes zero; statistical uncertainty prevents a definitive verdict."
     elif ci_80_low > 0.0:
         verdict = "UNDERCUT VIABLE"
-        rec = f"Undercut is statistically favored with expected track margin of {expected_margin:+.2f}s (P={prob_success:.1%})."
+        rec = f"Undercut margin is statistically positive: 80% CI [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] with expected margin {expected_margin:+.2f}s."
     else:
         verdict = "UNDERCUT NOT VIABLE"
-        rec = f"Gap of {gap_to_rival_sec:.1f}s is too large to bridge via single-lap tyre pace gain."
+        rec = f"Gap of {gap_to_rival_sec:.1f}s is too large; expected margin is negative ({expected_margin:+.2f}s)."
 
     return {
         "verdict": verdict,
-        "prob_success": round(prob_success, 3),
+        "prob_success": None,  # Disabled per validation policy: Brier skill <= 0
+        "win_probability_policy": "Disabled: Brier skill on held-out races <= 0; reporting empirical margin interval only",
         "expected_margin_sec": round(expected_margin, 2),
         "ci_80_lower": round(ci_80_low, 2),
         "ci_80_upper": round(ci_80_high, 2),

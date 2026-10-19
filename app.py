@@ -150,14 +150,19 @@ st.markdown("""
 
 @st.cache_data(ttl=120, show_spinner=False)
 def check_live_api_status() -> Tuple[bool, str]:
-    """Check reachability of public F1 archive endpoints."""
+    """
+    Check reachability of public F1 data endpoints.
+    Note: Formula 1 Live Timing token API returns HTTP 401 Unauthorized.
+    This probe tests the public Ergast archive endpoint as a network reachability stand-in.
+    """
     try:
-        resp = requests.get("https://ergast.com/api/f1/current.json", timeout=1.5)
+        resp = requests.get("https://ergast.com/api/f1/current.json", timeout=2.0)
         if resp.status_code == 200:
-            return True, "Online (Archive Mirror)"
+            return True, "Ergast Stand-In Reachable (Live F1 Timing: Blocked 401)"
         return False, f"HTTP {resp.status_code}"
     except Exception:
-        return False, "Offline / Unreachable"
+        return False, "Offline / No Network"
+
 
 
 # ─── Sidebar Configuration ────────────────────────────────

@@ -23,7 +23,7 @@
 3. **🛞 Tyre Intelligence & Degradation Modeling**
    - Per-stint Robust Huber degradation regression ($s / \text{lap}$) with fuel-burn mass correction.
    - 95% Confidence Intervals (standard and HAC autocorrelation-consistent).
-   - Monotone compound benchmarking and change-point tyre cliff detection.
+   - Monotone compound benchmarking with confidence intervals (tyre cliff change-point detection evaluated as research-only).
 
 4. **⚡ High-Frequency Telemetry Lab**
    - Millisecond-aligned Speed (km/h), Throttle %, and Brake traces.

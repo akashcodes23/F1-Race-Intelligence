@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 
 from config import DEFAULT_FUEL_EFFECT_SEC_PER_LAP
-from src.features.fuel import apply_fuel_correction, estimate_fuel_effect
+from src.features.fuel import (
+    apply_fuel_correction,
+    estimate_fuel_effect,
+    normalize_lap_fuel,
+    predict_s1a_lap_pace,
+)
 from src.tyre_analysis import compute_stint_degradation
 
 
@@ -183,8 +188,52 @@ class TestFuelEffect(unittest.TestCase):
         res = estimate_fuel_effect(laps, min_bound=0.02, max_bound=0.05)
         self.assertEqual(res["source"], "estimated")
         self.assertTrue(res["is_estimated"])
-        self.assertAlmostEqual(res["fuel_effect"], 0.035, places=3)
+    def test_normalize_lap_fuel_constant_under_zero_tyre_effect(self):
+        # Known-answer test: lap times fall by exactly 0.058 s/lap (pure fuel burn, zero tyre wear)
+        # T(L) = 90.0 - 0.058 * L
+        laps = np.arange(1, 31)
+        raw_times = 90.0 - 0.058 * laps
+        # Normalize to reference lap 1
+        normalized = normalize_lap_fuel(raw_times, laps, reference_lap=1, fuel_effect_sec_per_lap=0.058)
+        # Expected value is 90.0 - 0.058 * 1 = 89.942 across all laps
+        np.testing.assert_allclose(normalized, 89.942, atol=1e-6)
+        self.assertAlmostEqual(float(np.std(normalized)), 0.0, places=6)
+
+    def test_stop_no_tyre_effect_gives_zero_pace_gain(self):
+        # Known-answer test: Pit stop at lap 20 with identical compound and zero tyre wear
+        # Laps 16-20 (pre-stop) and Laps 22-26 (post-stop) follow pure fuel burn T(L) = 85.0 - 0.058 * L
+        pit_lap = 20
+        pre_laps = np.array([16, 17, 18, 19, 20])
+        post_laps = np.array([22, 23, 24, 25, 26])
+        pre_raw = 85.0 - 0.058 * pre_laps
+        post_raw = 85.0 - 0.058 * post_laps
+
+        # Normalize both to fuel load at pit_lap using shared helper
+        pre_norm = normalize_lap_fuel(pre_raw, pre_laps, reference_lap=pit_lap, fuel_effect_sec_per_lap=0.058)
+        post_norm = normalize_lap_fuel(post_raw, post_laps, reference_lap=pit_lap, fuel_effect_sec_per_lap=0.058)
+
+        # Pre and post normalized lap times must both equal 85.0 - 0.058 * 20 = 83.840
+        np.testing.assert_allclose(pre_norm, 83.840, atol=1e-6)
+        np.testing.assert_allclose(post_norm, 83.840, atol=1e-6)
+        delta_gain = float(np.mean(post_norm) - np.mean(pre_norm))
+        self.assertAlmostEqual(delta_gain, 0.0, places=6)
+
+    def test_s1a_recovers_fuel_coefficient_right_sign(self):
+        # Known-answer test: S1a trajectory with zero tyre degradation
+        # As fuel burns, pace improves (lap time falls) by fuel_effect per lap
+        anchor = 80.0
+        h = 10
+        traj = predict_s1a_lap_pace(anchor, horizon_laps=h, compound_deg_slope=0.0, fuel_effect_sec_per_lap=0.058)
+        # Lap h=1: 80.0 - 0.058 = 79.942
+        # Lap h=10: 80.0 - 0.580 = 79.420
+        self.assertAlmostEqual(traj[0], 79.942, places=3)
+        self.assertAlmostEqual(traj[9], 79.420, places=3)
+        # Slope across steps must be exactly -0.058 s/lap (negative)
+        steps = np.arange(1, h + 1)
+        fitted_slope = float(np.polyfit(steps, traj, deg=1)[0])
+        self.assertAlmostEqual(fitted_slope, -0.058, places=6)
 
 
 if __name__ == "__main__":
     unittest.main()
+

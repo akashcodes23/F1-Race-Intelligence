@@ -209,20 +209,85 @@ def estimate_fuel_effect(
         }
 
 
+def normalize_lap_fuel(
+    lap_time_sec: float | np.ndarray | pd.Series,
+    lap_number: float | np.ndarray | pd.Series,
+    reference_lap: float,
+    fuel_effect_sec_per_lap: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> float | np.ndarray | pd.Series:
+    """
+    Normalize lap time(s) to the fuel mass of reference_lap.
+
+    Documented Sign Convention:
+      Lap time falls by `fuel_effect` per lap as fuel burns off (car gets lighter and faster).
+      Therefore:
+        - For an earlier lap (lap_number < reference_lap), the car was heavier (slower).
+          Normalizing to reference_lap fuel mass makes it faster:
+          T_norm = T - fuel_effect * (reference_lap - lap_number)
+        - For a later lap (lap_number > reference_lap), the car was lighter (faster).
+          Normalizing to reference_lap fuel mass makes it slower:
+          T_norm = T + fuel_effect * (lap_number - reference_lap)
+
+      Both cases are unified by the single canonical formula:
+        T_norm = T + fuel_effect * (lap_number - reference_lap)
+
+    Parameters:
+      lap_time_sec: Raw lap time(s) in seconds.
+      lap_number: Lap number(s) corresponding to lap_time_sec.
+      reference_lap: The reference lap number whose fuel mass to normalize to.
+      fuel_effect_sec_per_lap: Seconds gained per lap from fuel burn (positive, default ~0.058 s/lap).
+
+    Returns:
+      Fuel-normalized lap time(s) in seconds.
+    """
+    return lap_time_sec + fuel_effect_sec_per_lap * (lap_number - reference_lap)
+
+
+def predict_fuel_pace(
+    anchor_pace_sec: float | np.ndarray,
+    horizon_laps: float | np.ndarray,
+    fuel_effect_sec_per_lap: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> float | np.ndarray:
+    """
+    Predict pace change due to fuel burn over horizon_laps.
+
+    As fuel burns, the car gets lighter and lap times decrease by fuel_effect per lap:
+      Predicted Pace = anchor_pace - fuel_effect * horizon_laps
+    """
+    return anchor_pace_sec - fuel_effect_sec_per_lap * horizon_laps
+
+
+def predict_s1a_lap_pace(
+    anchor_pace_sec: float,
+    horizon_laps: int,
+    compound_deg_slope: float,
+    fuel_effect_sec_per_lap: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+) -> np.ndarray:
+    """
+    Predict future lap times using S1a anchored physics model with canonical fuel sign.
+
+    For step h in 1..H:
+      Tyre wear increases lap time by: +compound_deg_slope * h
+      Fuel burn decreases lap time by: -fuel_effect * h
+      Net slope = compound_deg_slope - fuel_effect
+      Pace(h) = anchor_pace + (compound_deg_slope - fuel_effect) * h
+    """
+    steps = np.arange(1, horizon_laps + 1)
+    net_slope = compound_deg_slope - fuel_effect_sec_per_lap
+    return anchor_pace_sec + net_slope * steps
+
+
 def apply_fuel_correction(
     laps: pd.DataFrame,
     fuel_effect_sec_per_lap: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
     reference_lap: int = 1,
 ) -> pd.DataFrame:
     """
-    Apply fuel-mass correction to lap times.
-
-    Formula:
-      FuelCorrectedLapTimeSec = LapTimeSec + fuel_effect * (LapNumber - reference_lap)
+    Apply fuel-mass correction to lap times using normalize_lap_fuel.
 
     Normalizes all laps to the fuel mass of reference_lap (start of race).
     As race progresses and car gets lighter, adding back the fuel burn advantage
-    isolates the true tyre degradation.
+    isolates the pure tyre degradation.
 
     Returns:
       pd.DataFrame with FuelCorrectedLapTimeSec and FuelEffectAddedSec columns.
@@ -238,10 +303,10 @@ def apply_fuel_correction(
             return df
 
     lap_num = df["LapNumber"] if "LapNumber" in df.columns else pd.Series(1, index=df.index)
-    laps_from_ref = (lap_num - reference_lap).clip(lower=0)
-
-    fuel_added = laps_from_ref * fuel_effect_sec_per_lap
-    df["FuelEffectAddedSec"] = fuel_added
-    df["FuelCorrectedLapTimeSec"] = df["LapTimeSec"] + fuel_added
+    df["FuelCorrectedLapTimeSec"] = normalize_lap_fuel(
+        df["LapTimeSec"], lap_num, reference_lap=reference_lap, fuel_effect_sec_per_lap=fuel_effect_sec_per_lap
+    )
+    df["FuelEffectAddedSec"] = df["FuelCorrectedLapTimeSec"] - df["LapTimeSec"]
 
     return df
+

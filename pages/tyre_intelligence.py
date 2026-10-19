@@ -16,7 +16,7 @@ from src.visualization import degradation_curve
 
 def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
     st.markdown("### 🛞 Tyre Intelligence & Stint Degradation Engine")
-    st.caption("Robust Huber degradation regression with fuel-burn mass correction, 95% Confidence Intervals, and tyre cliff change-point detection.")
+    st.caption("Robust Huber degradation regression with fuel-burn mass correction, 95% Confidence Intervals, and compound degradation benchmarks (tyre cliff detection evaluated as research-only).")
 
     if laps is None or laps.empty or "Driver" not in laps.columns:
         st.warning("⚠️ No valid lap data found for tyre analysis.")
@@ -52,7 +52,7 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
 
     drv_laps = laps[laps["Driver"] == selected_driver].copy()
 
-    st.markdown(f"#### Robust Stint Degradation & Tyre Cliffs — {selected_driver}")
+    st.markdown(f"#### Robust Stint Degradation — {selected_driver}")
     fig_deg = degradation_curve(
         drv_laps,
         selected_driver,
@@ -69,7 +69,7 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
     ])
 
     with tab1:
-        st.markdown(f"**Detailed Stint Huber Regressions & Cliff Diagnostics — {selected_driver}**")
+        st.markdown(f"**Detailed Stint Huber Regressions — {selected_driver}**")
         all_stints = analyze_all_stints(drv_laps, fuel_effect=fuel_val, use_fuel_correction=use_fuel_corr)
         if not all_stints.empty:
             st.dataframe(all_stints, use_container_width=True, hide_index=True)
