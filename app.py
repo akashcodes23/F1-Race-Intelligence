@@ -15,6 +15,10 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from typing import Tuple
+
+import requests
+
 from config import CACHE_DIR, SEASONS
 from pages.driver_comparison import render_driver_comparison
 from pages.ml_lab import render_ml_lab
@@ -27,6 +31,7 @@ from pages.telemetry_lab import render_telemetry_lab
 from pages.tyre_intelligence import render_tyre_intelligence
 from src.data_loader import (
     get_available_sessions,
+    get_demo_races,
     get_event_names,
     init_cache,
     load_session,
@@ -143,6 +148,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def check_live_api_status() -> Tuple[bool, str]:
+    """Check reachability of public F1 archive endpoints."""
+    try:
+        resp = requests.get("https://ergast.com/api/f1/current.json", timeout=1.5)
+        if resp.status_code == 200:
+            return True, "Online (Archive Mirror)"
+        return False, f"HTTP {resp.status_code}"
+    except Exception:
+        return False, "Offline / Unreachable"
+
+
 # ─── Sidebar Configuration ────────────────────────────────
 st.sidebar.markdown("""
 <div class="f1-brand-header">
@@ -153,35 +170,53 @@ st.sidebar.markdown("""
 
 st.sidebar.markdown("#### 🏁 Session Selection")
 
-# 1. Season selection
-default_season_idx = SEASONS.index(2023) if 2023 in SEASONS else 0
-season = st.sidebar.selectbox("Championship Season", SEASONS, index=default_season_idx)
+demo_races_list = get_demo_races()
+demo_options = [f"{y} {gp}" for (y, gp) in demo_races_list] if demo_races_list else ["2023 Monaco Grand Prix"]
 
-# 2. Dynamic Grand Prix selection
-event_names = get_event_names(season)
-if not event_names:
-    event_names = ["Monaco Grand Prix", "Bahrain Grand Prix", "British Grand Prix"]
+source_mode = st.sidebar.radio(
+    "Data Source Mode",
+    ["📦 Bundled Demo (13 Offline GPs)", "🌐 Live FastF1 Exploration"],
+    index=0,
+    help="Bundled demo guarantees instant zero-network access to 13 verified Grand Prix events. Live mode queries external F1 feeds.",
+)
 
-default_gp_idx = 0
-for idx, name in enumerate(event_names):
-    if "Monaco" in name:
-        default_gp_idx = idx
-        break
+if source_mode == "📦 Bundled Demo (13 Offline GPs)":
+    default_demo_idx = 0
+    for idx, opt in enumerate(demo_options):
+        if "2023 Monaco" in opt:
+            default_demo_idx = idx
+            break
+    selected_demo = st.sidebar.selectbox("Select Offline Grand Prix", demo_options, index=default_demo_idx)
+    season = int(selected_demo.split()[0])
+    grand_prix = " ".join(selected_demo.split()[1:])
+    selected_session_name = "Race"
+    selected_session_id = "R"
+    load_telemetry_opt = False
+else:
+    default_season_idx = SEASONS.index(2023) if 2023 in SEASONS else 0
+    season = st.sidebar.selectbox("Championship Season", SEASONS, index=default_season_idx)
 
-grand_prix = st.sidebar.selectbox("Grand Prix", event_names, index=default_gp_idx)
+    event_names = get_event_names(season)
+    if not event_names:
+        event_names = ["Monaco Grand Prix", "Bahrain Grand Prix", "British Grand Prix"]
 
-# 3. Dynamic Session selection
-available_sessions_map = get_available_sessions(season, grand_prix)
-session_labels = list(available_sessions_map.keys())
-default_session_idx = session_labels.index("Race") if "Race" in session_labels else len(session_labels) - 1
+    default_gp_idx = 0
+    for idx, name in enumerate(event_names):
+        if "Monaco" in name:
+            default_gp_idx = idx
+            break
 
-selected_session_name = st.sidebar.selectbox("Session Type", session_labels, index=default_session_idx)
-selected_session_id = available_sessions_map.get(selected_session_name, selected_session_name)
+    grand_prix = st.sidebar.selectbox("Grand Prix", event_names, index=default_gp_idx)
 
-# 4. Telemetry toggle
-load_telemetry_opt = st.sidebar.checkbox("Include Telemetry Traces", value=True, help="Enables high-frequency Speed, Throttle, and Brake overlays")
+    available_sessions_map = get_available_sessions(season, grand_prix)
+    session_labels = list(available_sessions_map.keys())
+    default_session_idx = session_labels.index("Race") if "Race" in session_labels else len(session_labels) - 1
 
-# 5. Load action button
+    selected_session_name = st.sidebar.selectbox("Session Type", session_labels, index=default_session_idx)
+    selected_session_id = available_sessions_map.get(selected_session_name, selected_session_name)
+    load_telemetry_opt = st.sidebar.checkbox("Include Telemetry Traces", value=True, help="Enables high-frequency Speed, Throttle, and Brake overlays")
+
+# Load action button
 btn_load = st.sidebar.button("⚡ Load Session Data", use_container_width=True)
 
 # ─── Data Caching Helper ──────────────────────────────────
@@ -202,7 +237,7 @@ if "has_loaded_initial" not in st.session_state:
 
 if btn_load or not st.session_state["has_loaded_initial"]:
     st.session_state["has_loaded_initial"] = True
-    with st.spinner(f"Loading {season} {grand_prix} ({selected_session_name}) from FastF1..."):
+    with st.spinner(f"Loading {season} {grand_prix} ({selected_session_name})..."):
         session_obj, laps_df = fetch_session_data(season, grand_prix, selected_session_id, load_telemetry_opt)
         st.session_state["session"] = session_obj
         st.session_state["laps"] = laps_df
@@ -215,6 +250,30 @@ if btn_load or not st.session_state["has_loaded_initial"]:
 current_session = st.session_state["session"]
 current_laps = st.session_state["laps"]
 current_meta = st.session_state["meta"]
+
+# Sidebar Connection & Data Status
+st.sidebar.markdown("---")
+st.sidebar.markdown("##### 🔌 Connection & Data Status")
+is_live_reachable, reachability_msg = check_live_api_status()
+reach_color = "#39b54a" if is_live_reachable else "#ffaa00"
+st.sidebar.markdown(
+    f"- **Live API Reachability:** <span style='color:{reach_color};font-weight:600;'>{reachability_msg}</span>",
+    unsafe_allow_html=True,
+)
+if current_session is not None:
+    src_label = "Live FastF1 Session Object"
+    src_color = "#00d2be"
+elif current_laps is not None and not current_laps.empty:
+    src_label = "Bundled Demo (Offline)"
+    src_color = "#39b54a"
+else:
+    src_label = "No Session Loaded"
+    src_color = "#ff4444"
+
+st.sidebar.markdown(
+    f"- **Active Data Source:** <span style='color:{src_color};font-weight:600;'>{src_label}</span>",
+    unsafe_allow_html=True,
+)
 
 # ─── Navigation Header ────────────────────────────────────
 sections = [

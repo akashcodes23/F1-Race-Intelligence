@@ -6,8 +6,6 @@ import numpy as np
 import pandas as pd
 
 from src.ml_pipeline import (
-    calc_s1a_deg,
-    fit_s1a,
     load_trained_model,
     predict_s1a_stint,
     prepare_ml_features,

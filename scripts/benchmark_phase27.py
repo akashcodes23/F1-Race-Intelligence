@@ -125,7 +125,7 @@ def run_phase27_benchmark():
         test_data["_Pred_B"] = test_pred_B
 
         # 3. Horizon Evaluation on test_data
-        for (drv, st), s_grp in test_data.groupby(["Driver", "Stint"]):
+        for (_drv, _st), s_grp in test_data.groupby(["Driver", "Stint"]):
             s_grp = s_grp.sort_values("LapNumber").reset_index(drop=True)
             if len(s_grp) < 5:
                 continue
@@ -139,7 +139,6 @@ def run_phase27_benchmark():
                     continue
                 orig_idx = cands.index[0]
                 orig_row = s_grp.iloc[orig_idx]
-                orig_age = float(orig_row["TyreLife"])
                 orig_pace = float(orig_row["RelativeLapTimeSec"])
                 orig_comp = str(orig_row["Compound"])
 
@@ -368,7 +367,7 @@ def run_phase27_benchmark():
                 continue
             N_eval = len(m_list)
             df_m = pd.DataFrame(m_list)
-            race_groups = {r: grp for r, grp in df_m.groupby("race")}
+            race_groups = dict(list(df_m.groupby("race")))
             race_keys = list(race_groups.keys())
 
             point_mae = np.mean(df_m["abs_err"])
@@ -422,8 +421,8 @@ def run_phase27_benchmark():
         diff_stint = np.mean(df_s1a["stint_err"]) - np.mean(df_p["stint_err"])
 
         race_keys = sorted(df_p["race"].unique())
-        p_groups = {r: grp for r, grp in df_p.groupby("race")}
-        s_groups = {r: grp for r, grp in df_s1a.groupby("race")}
+        p_groups = dict(list(df_p.groupby("race")))
+        s_groups = dict(list(df_s1a.groupby("race")))
 
         boot_diffs = []
         for _ in range(1000):

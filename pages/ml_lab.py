@@ -90,7 +90,7 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
             f"⚖️ **Model Comparison & Statistical Transparency (Phase 2.7):**\\n"
             f"- **Single-Lap Evaluation ($H=1$):** Variant A achieves a 1-step MAE of **{hgbr_a.get('mean_mae', 0.367):.3f}s** vs Persistence (**{pers_cv.get('mean_mae', 0.384):.3f}s**). "
             f"However, this advantage is statistically borderline across the 13 held-out races (paired $t = -1.995, p = 0.0693$).\\n"
-            f"- **Multi-Step Stint Forecasts ($H \ge 5$):** Variant A degrades under recursive feedback and is outperformed by Persistence. "
+            rf"- **Multi-Step Stint Forecasts ($H \ge 5$):** Variant A degrades under recursive feedback and is outperformed by Persistence. "
             f"Static origin models (Variant B, $S_1$, $S_2$) carry an initial ~0.6–0.9 s/lap offset at $H=1$ because they lack an origin pace anchor.\\n"
             f"- **Anchored Physics Model ($S_1a$):** Anchors directly to the driver's current fuel- and tyre-corrected pace, achieving **1.213s MAE** on pit pace-gain accuracy (beating Naive 1.792s by 32.3%)."
         )
@@ -169,9 +169,9 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
 
             st.markdown("""
             **Why Variant B at $H=1$ Moved from 0.586s (Phase 2.5) to 1.153s (Phase 2.6/2.7):**
-            - The Phase 2.5 horizon evaluation evaluated only a **single early stint origin** ($\text{TyreLife} \sim 7$) where car pace is close to reference pace.
-            - The Phase 2.6/2.7 evaluation expands across **all eligible stints and multiple origins** ($\text{TyreLife} \in [2, 4]$, $[7, 9]$, and $[14, 16]$).
-            - At late origins ($\text{TyreLife} \sim 15$), tyres have degraded significantly; because Variant B ignores the origin pace, it incurs an initial global offset against that specific stint's elevated pace, shifting average $H=1$ MAE to 1.153s.
+            - The Phase 2.5 horizon evaluation evaluated only a **single early stint origin** ($\text{TyreLife} \\sim 7$) where car pace is close to reference pace.
+            - The Phase 2.6/2.7 evaluation expands across **all eligible stints and multiple origins** ($\text{TyreLife} \\in [2, 4]$, $[7, 9]$, and $[14, 16]$).
+            - At late origins ($\text{TyreLife} \\sim 15$), tyres have degraded significantly; because Variant B ignores the origin pace, it incurs an initial global offset against that specific stint's elevated pace, shifting average $H=1$ MAE to 1.153s.
 
             **Collinearity Note on Variant B:**
             In Variant B, `LapNumber` and `LapsRemaining` are collinear ($\text{LapNumber} + \text{LapsRemaining} \approx \text{TotalLaps}$).
@@ -180,7 +180,7 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
 
             st.warning(
                 "⚖️ **Phase 2.7 Candidate Gate Check ($S_1a$ vs Persistence):**\\n"
-                "- **Pit Pace-Gain Accuracy:** $S_1a$ achieves **1.213s MAE** (beating Naive $\Delta=0$ of 1.792s by 32.3%).\\n"
+                "- **Pit Pace-Gain Accuracy:** $S_1a$ achieves **1.213s MAE** (beating Naive $\\Delta=0$ of 1.792s by 32.3%).\\n"
                 "- **Stint-Total Error:** At $H=10$, Persistence achieves 4.272s vs $S_1a$ 7.152s (Delta: +2.880s, 95% CI: `[+1.599, +4.076]`). "
                 "At $H=20$, Persistence achieves 9.510s vs $S_1a$ 23.163s (Delta: +13.653s, 95% CI: `[+9.066, +17.008]`).\\n"
                 "- **Gate Condition Status:** Because the 95% difference bootstrap CI does not include zero, $S_1a$ does NOT beat Persistence on stint-total error across long horizons. Execution stops for user decision."

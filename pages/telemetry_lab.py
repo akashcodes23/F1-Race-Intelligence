@@ -16,8 +16,17 @@ from src.visualization import circuit_map_plot, telemetry_overlay_plot
 def render_telemetry_lab(session, laps: pd.DataFrame, default_d1: str = "VER", default_d2: str = "HAM"):
     st.markdown("### ⚡ Telemetry Lab & Circuit Analysis")
 
-    if session is None or laps is None or laps.empty:
-        st.warning("⚠️ No session data loaded.")
+    if laps is None or laps.empty:
+        st.warning("⚠️ No lap data loaded. Please select a session from the sidebar.")
+        return
+
+    if session is None:
+        st.warning(
+            "⚠️ **Telemetry Not Available in Demo Data**\n\n"
+            "The bundled offline demo dataset (`data/demo/demo_laps.parquet`) includes verified lap timing, tyre compound, "
+            "and stint telemetry to maintain a lightweight footprint (<1 MB). High-frequency continuous traces "
+            "(millisecond Speed, Throttle, Brake, and GPS coordinates) require an authenticated live FastF1 connection."
+        )
         return
 
     available_drivers = sorted(laps["Driver"].dropna().unique())
