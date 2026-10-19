@@ -294,6 +294,7 @@ class Track3DEngine:
         self,
         driver_positions: List[Dict[str, Any]],
         lap_progress: float = 0.5,
+        lap_time_ref_sec: float = 90.0,
     ) -> List[Dict[str, Any]]:
         """
         Interpolates 3D coordinates for multiple drivers at given lap and progress.
@@ -301,6 +302,7 @@ class Track3DEngine:
         """
         cars_3d = []
         lead_progress = lap_progress
+        ref_time = max(40.0, float(lap_time_ref_sec))
 
         for drv in driver_positions:
             name = drv.get("driver", "DRV")
@@ -308,8 +310,8 @@ class Track3DEngine:
             pos = drv.get("position", 1)
             gap_s = drv.get("gap_to_lead_s", 0.0)
 
-            # Convert gap in seconds into spatial lap offset (assuming avg lap time 90s)
-            spatial_lag = (gap_s / 90.0) % 1.0
+            # Convert gap in seconds into spatial lap offset using reference lap time [DERIVED]
+            spatial_lag = (gap_s / ref_time) % 1.0
             car_prog = (lead_progress - spatial_lag) % 1.0
 
             cx, cy, cz, spd = self.get_track_point(car_prog)

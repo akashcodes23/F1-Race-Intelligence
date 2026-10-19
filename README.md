@@ -50,6 +50,12 @@ F1-Race-Intelligence/
 ├── app.py                          # Streamlit application entry point & unified router
 ├── config.py                       # Centralized configuration & theme tokens
 ├── requirements.txt                # Pinned production dependencies
+├── docs/                           # Technical documentation suite
+│   ├── ARCHITECTURE.md             # System design, dataflow, and component structure
+│   ├── METHODOLOGY.md              # Mathematical derivations, formulas, and physics models
+│   ├── MODEL_VALIDATION.md         # Empirical benchmarks, LORO evaluation & negative gates
+│   ├── DATA_PROVENANCE.md          # Data sources, FastF1 schemas & offline demo dataset
+│   └── KNOWN_LIMITATIONS.md        # Physical confounders, survival bias & modeling boundaries
 ├── src/
 │   ├── data/                       # Modular cleaning, loader, and schema validation
 │   ├── features/fuel.py            # Canonical fuel normalization & S1a anchor helper
@@ -64,17 +70,27 @@ F1-Race-Intelligence/
 │       ├── track_3d.py             # 3D WebGL / Three.js track & telemetry engine
 │       └── audio.py                # Synthesized Web Audio pit-wall radio chimes
 ├── pages/
-│   ├── 1_Race_Cockpit.py           # Mission Control Pit-Wall Cockpit UI
-│   ├── 2_Telemetry_Lab.py          # Driver Telemetry Lab UI
-│   ├── 3_Model_Validation.py       # Strategy Engine Validation UI
+│   ├── race_cockpit.py             # Mission Control Pit-Wall Cockpit UI
 │   ├── race_overview.py            # Session Overview UI
 │   ├── driver_comparison.py        # Head-to-Head Driver Comparison UI
 │   ├── tyre_intelligence.py        # Tyre Intelligence UI
+│   ├── telemetry_lab.py            # Driver Telemetry Lab UI
 │   ├── strategy_simulator.py       # Strategy Simulator UI
-│   ├── ml_lab.py                   # Machine Learning Lab UI
+│   ├── ml_lab.py                   # Machine Learning Lab & Validation UI
 │   └── season_explorer.py          # Season Explorer UI
 └── tests/                          # 70 unit tests passing offline (Pytest & Ruff)
 ```
+
+---
+
+## 📚 Technical Documentation Suite
+
+For deep technical evaluations, refer to the dedicated documentation:
+* [System Architecture](docs/ARCHITECTURE.md) — Layered platform design, state management, and 3D WebGL pipeline.
+* [Mathematical Methodology](docs/METHODOLOGY.md) — Fuel mass burn-off normalization, Huber robust regression, S1a derivation, and difference-based Monte Carlo decision theory.
+* [Model Validation & Benchmarks](docs/MODEL_VALIDATION.md) — LORO cross-validation leaderboard, stop-window hit rates, and finish-order comparisons.
+* [Data Provenance & Offline Dataset](docs/DATA_PROVENANCE.md) — FastF1 / Ergast schema definitions, 13 offline demo races, and cleaning protocols.
+* [Known Limitations & Physical Confounders](docs/KNOWN_LIMITATIONS.md) — Traffic dirty air, track rubbering, stint selection bias, and negative results.
 
 ---
 

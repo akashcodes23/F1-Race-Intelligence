@@ -111,6 +111,9 @@ def render_race_cockpit(session_obj: Any, laps_df: Optional[pd.DataFrame], meta:
     drivers_list = sorted(laps_df["Driver"].dropna().unique().tolist())
     driver_lap_data = []
 
+    # Calculate leader cumulative race time to derive authentic physical gaps [DERIVED]
+    cum_times: Dict[str, float] = {}
+    completed_laps_map: Dict[str, int] = {}
     for d in drivers_list:
         d_laps = laps_df[(laps_df["Driver"] == d) & (laps_df["LapNumber"] <= current_lap)]
         if not d_laps.empty:
@@ -119,22 +122,49 @@ def render_race_cockpit(session_obj: Any, laps_df: Optional[pd.DataFrame], meta:
             team = str(last_lap.get("Team", "Red Bull Racing"))
             comp = str(last_lap.get("Compound", "MEDIUM"))
             tyre_life = int(last_lap.get("TyreLife", current_lap)) if pd.notna(last_lap.get("TyreLife")) else current_lap
+
+            # Cumulative elapsed time from observed lap times [DERIVED]
+            valid_lap_times = d_laps["LapTimeSec"].dropna()
+            cum_time = float(valid_lap_times.sum()) if not valid_lap_times.empty else 0.0
+            cum_times[d] = cum_time
+            completed_laps_map[d] = int(d_laps["LapNumber"].max())
+
             driver_lap_data.append({
                 "driver": d,
                 "position": pos,
                 "team": team,
                 "compound": comp,
                 "tyre_life": tyre_life,
+                "cum_time": cum_time,
+                "last_lap_num": int(last_lap.get("LapNumber", current_lap)),
             })
 
     driver_lap_data.sort(key=lambda x: x["position"])
 
-    # Compute realistic gaps relative to leader
+    # Determine reference lap time from race leader for spatial projection
+    leader_cum_time = driver_lap_data[0]["cum_time"] if driver_lap_data else 0.0
+    ref_lap_time = 90.0
+    if not clean_df.empty and "LapTimeSec" in clean_df.columns:
+        med_time = float(clean_df["LapTimeSec"].median())
+        if 50.0 <= med_time <= 140.0:
+            ref_lap_time = med_time
+
+    # Compute deterministic gaps [DERIVED] relative to leader
     for idx, d in enumerate(driver_lap_data):
-        d["gap_to_lead_s"] = 0.0 if idx == 0 else round(idx * 1.85 + (idx**1.1) * 0.4, 2)
+        if idx == 0:
+            d["gap_to_lead_s"] = 0.0
+        else:
+            if d["last_lap_num"] == current_lap and d["cum_time"] > 0 and leader_cum_time > 0:
+                d["gap_to_lead_s"] = max(0.0, round(d["cum_time"] - leader_cum_time, 2))
+            else:
+                # Driver is lapped or has fewer laps: calculate lap deficit [DERIVED]
+                lap_deficit = current_lap - d["last_lap_num"]
+                d["gap_to_lead_s"] = max(0.0, round(lap_deficit * ref_lap_time + max(0.0, d["cum_time"] - leader_cum_time), 2))
 
     top_drivers_3d = driver_lap_data[:10]  # Top 10 for 3D track markers
-    cars_3d = track_engine.interpolate_car_positions(top_drivers_3d, lap_progress=lap_progress)
+    cars_3d = track_engine.interpolate_car_positions(top_drivers_3d, lap_progress=lap_progress, lap_time_ref_sec=ref_lap_time)
+
+    st.caption("ℹ️ **[SIMULATED]** 3D Circuit geometry interpolated from reference track waypoints. Spatial car positions projected along spline from deterministic lap progress & cumulative timing gaps.")
 
     if "Three.js" in view_mode:
         threejs_html = track_engine.generate_threejs_html(cars_3d, height=520)
@@ -226,10 +256,10 @@ def render_race_cockpit(session_obj: Any, laps_df: Optional[pd.DataFrame], meta:
 
     with col_stats:
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("P(Pit Beats Stay)", f"{decision_res.prob_pit_beats_stay:.1%}")
-        m2.metric("Expected Net Gain", f"{decision_res.expected_net_gain_sec:+.2f} s")
-        m3.metric("80% Credible Interval", f"[{decision_res.ci_80_lower:+.1f}s, {decision_res.ci_80_upper:+.1f}s]")
-        m4.metric("Break-Even Horizon", f"{decision_res.break_even_laps:.1f} laps")
+        m1.metric("P(Pit Beats Stay) [SIMULATED]", f"{decision_res.prob_pit_beats_stay:.1%}", help="Probability across 1,000 difference-based Monte Carlo simulations")
+        m2.metric("Expected Net Gain [ESTIMATED]", f"{decision_res.expected_net_gain_sec:+.2f} s", help="Projected race time saved (Stay time - Pit time). Positive = faster.")
+        m3.metric("80% Credible Interval [ESTIMATED]", f"[{decision_res.ci_80_lower:+.1f}s, {decision_res.ci_80_upper:+.1f}s]", help="80% simulation quantile range")
+        m4.metric("Break-Even Horizon [ESTIMATED]", f"{decision_res.break_even_laps:.1f} laps", help="Laps on fresh compound required to recover pit-stop loss")
 
         # Visual 80% CI interval bar
         fig_ci = go.Figure()

@@ -27,27 +27,27 @@ def render_race_overview(session, laps: pd.DataFrame):
 
     summary = get_session_summary(session, laps)
 
-    # ── Top KPI Banner ──
+    # ── Top KPI Banner [OBSERVED] ──
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Laps Recorded", f"{summary['total_laps']:,}")
+        st.metric("Total Laps [OBSERVED]", f"{summary['total_laps']:,}", help="Total number of recorded lap entries in session timing feed")
     with col2:
-        st.metric("Drivers in Session", summary["total_drivers"])
+        st.metric("Drivers in Session [OBSERVED]", summary["total_drivers"], help="Distinct driver competition entries present")
     with col3:
         fastest_txt = summary.get("fastest_lap_formatted", "N/A")
         drv = summary.get("fastest_driver", "N/A")
-        st.metric("Fastest Lap", fastest_txt, delta=f"{drv} (L{summary.get('fastest_lap_num', '-')})")
+        st.metric("Fastest Lap [OBSERVED]", fastest_txt, delta=f"{drv} (L{summary.get('fastest_lap_num', '-')})", help="Outright lowest single lap time recorded in session")
     with col4:
         comp = summary.get("fastest_compound", "N/A")
-        st.metric("Fastest Compound", comp)
+        st.metric("Fastest Compound [OBSERVED]", comp, help="Tyre compound fitted when fastest lap was set")
 
     st.markdown("---")
 
     # ── Leaderboard & Position Progression Tabs ──
-    tab1, tab2, tab3 = st.tabs(["📊 Session Leaderboard", "📈 Position Progression", "⏱️ Pace Distribution"])
+    tab1, tab2, tab3 = st.tabs(["📊 Session Leaderboard [OBSERVED]", "📈 Position Progression [DERIVED]", "⏱️ Pace Distribution [DERIVED]"])
 
     with tab1:
-        st.markdown("#### Official Session Leaderboard")
+        st.markdown("#### Official Session Leaderboard [OBSERVED]")
         leaderboard = get_session_leaderboard(laps)
         if not leaderboard.empty:
             st.dataframe(

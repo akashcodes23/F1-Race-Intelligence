@@ -31,11 +31,11 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
 
     fc1, fc2, fc3, fc4 = st.columns(4)
     with fc1:
-        st.metric("Fuel Burn Effect", f"{fuel_val:.3f} s/lap", help="Pace gained per lap as fuel mass burns off")
+        st.metric("Fuel Burn Effect [ESTIMATED]", f"{fuel_val:.3f} s/lap", help="Pace gained per lap as fuel mass burns off")
     with fc2:
         st.metric("Estimation Source", source_label, help=fuel_info.get("reason", ""))
     with fc3:
-        st.metric("Dry Matched Stints", fuel_info["transitions_count"])
+        st.metric("Dry Matched Stints [OBSERVED]", fuel_info["transitions_count"], help="Count of qualifying dry same-compound stint transitions")
     with fc4:
         use_fuel_corr = st.toggle("Enable Fuel Correction", value=True, help="Normalizes laps to race-start fuel mass to isolate true tyre wear")
 
@@ -52,7 +52,7 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
 
     drv_laps = laps[laps["Driver"] == selected_driver].copy()
 
-    st.markdown(f"#### Robust Stint Degradation — {selected_driver}")
+    st.markdown(f"#### Robust Stint Degradation — {selected_driver} [ESTIMATED]")
     fig_deg = degradation_curve(
         drv_laps,
         selected_driver,
@@ -63,9 +63,9 @@ def render_tyre_intelligence(laps: pd.DataFrame, default_driver: str = "VER"):
 
     # ── 3. Tabs: Stint Breakdown, Consistency Index, Compound Benchmarks ──
     tab1, tab2, tab3 = st.tabs([
-        "🔬 Per-Stint Robust Huber Regressions",
-        "🎯 Driver Consistency & Pace Rankings",
-        "🏁 Compound Performance Summary",
+        "🔬 Per-Stint Robust Huber Regressions [ESTIMATED]",
+        "🎯 Driver Consistency Rankings [DERIVED]",
+        "🏁 Compound Benchmarks [ESTIMATED]",
     ])
 
     with tab1:

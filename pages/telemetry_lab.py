@@ -171,14 +171,26 @@ def render_telemetry_lab(
     # Extract or reconstruct telemetry
     d1_laps = laps[laps["Driver"] == driver1]
     d2_laps = laps[laps["Driver"] == driver2]
+    is_live_telemetry = session is not None and hasattr(session, "laps")
 
-    if session is not None and hasattr(session, "laps"):
+    if is_live_telemetry:
         with st.spinner("Extracting continuous high-frequency channels from FastF1..."):
             tel1 = extract_lap_telemetry(session, driver1)
             tel2 = extract_lap_telemetry(session, driver2)
+        st.success(
+            "📡 **[OBSERVED] Live Onboard Telemetry Loaded:** Continuous high-frequency time-series data "
+            "directly extracted from FastF1 session channels."
+        )
     else:
         tel1 = reconstruct_offline_telemetry(circuit_name, driver1, d1_laps)
         tel2 = reconstruct_offline_telemetry(circuit_name, driver2, d2_laps)
+        st.warning(
+            "⚠️ **[SIMULATED] Reconstructed Telemetry (Offline Educational Mode):** "
+            "High-frequency time-series telemetry is not stored in the lightweight offline demo dataset. "
+            "Speed traces are reconstructed from verified circuit apex geometry and driver speed-trap observations (`SpeedST`). "
+            "Throttle, Brake, RPM, and Gear traces are simulated from longitudinal acceleration gradients ($\nabla v$) "
+            "and MUST NOT be treated as recorded onboard physical measurements."
+        )
 
     if tel1 is None or tel2 is None or tel1.empty or tel2.empty:
         st.error("⚠️ Telemetry traces could not be extracted.")
@@ -190,14 +202,20 @@ def render_telemetry_lab(
         return
 
     # ─── High-Frequency Overlay Plot ──────────────────────────────
+    plot_badge = "[OBSERVED]" if is_live_telemetry else "[SIMULATED]"
+    st.markdown(f"#### 📊 High-Frequency Overlay Traces {plot_badge}")
     fig_tel = telemetry_overlay_plot(aligned, driver1, driver2)
     st.plotly_chart(fig_tel, use_container_width=True)
 
     st.divider()
 
     # ─── 50m Micro-Sector Delta Ribbon ────────────────────────────
-    st.markdown("#### ⚡ Micro-Sector Delta Ribbon (50m Bins)")
-    st.caption("Shows meter-by-meter where lap time is won (Cyan) or lost (Red) over the lap.")
+    ribbon_badge = "[DERIVED]" if is_live_telemetry else "[SIMULATED]"
+    st.markdown(f"#### ⚡ Micro-Sector Delta Ribbon (50m Bins) {ribbon_badge}")
+    st.caption(
+        "Shows meter-by-meter where lap time is won or lost. "
+        "**Polarity Convention:** Positive Cumulative Delta = Driver 1 is faster (ahead on elapsed micro-sector time)."
+    )
 
     ribbon_df = compute_micro_sector_ribbon(aligned, bin_size_m=50.0)
     if not ribbon_df.empty:
@@ -243,7 +261,9 @@ def render_telemetry_lab(
         st.plotly_chart(fig_ribbon, use_container_width=True)
 
     # ─── Corner Apex Speeds & Braking Points Matrix ───────────────
-    st.markdown("#### 🎯 Corner Apex Speeds & Braking Points Matrix")
+    apex_badge = "[DERIVED]" if is_live_telemetry else "[SIMULATED]"
+    st.markdown(f"#### 🎯 Corner Apex Speeds & Braking Points Matrix {apex_badge}")
+    st.caption("Identifies local speed minima (corner apexes) and preceding longitudinal braking onset distance.")
     col_ap1, col_ap2 = st.columns(2)
 
     with col_ap1:
@@ -264,7 +284,8 @@ def render_telemetry_lab(
 
     # ─── Aerodynamic Speed Trap Comparison ────────────────────────
     st.markdown("---")
-    st.markdown("#### 🏎️ Aerodynamic & Speed Trap Comparison")
+    st.markdown("#### 🏎️ Aerodynamic & Speed Trap Comparison [OBSERVED]")
+    st.caption("Recorded maximum velocities at official FIA circuit timing traps across Intermediate 1, Intermediate 2, Finish Line, and Speed Trap.")
 
     speed_cols = ["SpeedI1", "SpeedI2", "SpeedFL", "SpeedST"]
     present_cols = [c for c in speed_cols if c in laps.columns]
