@@ -92,13 +92,17 @@ def compute_stay_out_anchor(recent_laps: pd.DataFrame, fuel_effect: float = DEFA
     """
     if recent_laps is None or recent_laps.empty:
         return 80.0
-    clean = recent_laps.dropna(subset=["LapTimeSec"]).tail(5).copy()
+    clean = recent_laps.dropna(subset=["LapTimeSec"]).copy()
+    if clean.empty or "LapTimeSec" not in clean.columns:
+        return 80.0
+    clean = clean[np.isfinite(clean["LapTimeSec"]) & (clean["LapTimeSec"] > 20.0)].tail(5)
     if clean.empty:
         return 80.0
-    current_lap = float(clean["LapNumber"].max())
+    current_lap = float(clean["LapNumber"].max()) if "LapNumber" in clean.columns else 1.0
     # Fuel adjustment: normalize past laps to current lap fuel mass using canonical helper
+    lap_nums = clean["LapNumber"] if "LapNumber" in clean.columns else pd.Series(current_lap, index=clean.index)
     adj_pace = normalize_lap_fuel(
-        clean["LapTimeSec"], clean["LapNumber"], reference_lap=current_lap, fuel_effect_sec_per_lap=fuel_effect
+        clean["LapTimeSec"], lap_nums, reference_lap=current_lap, fuel_effect_sec_per_lap=fuel_effect
     )
     return float(np.median(adj_pace))
 
@@ -124,7 +128,10 @@ def compute_empirical_trend(
     if stint_laps is None or len(stint_laps) < 3:
         return prior_slope, prior_slope
 
-    recent = stint_laps.dropna(subset=["LapTimeSec"]).tail(n_recent)
+    recent = stint_laps.dropna(subset=["LapTimeSec"]).copy()
+    if "LapTimeSec" not in recent.columns:
+        return prior_slope, prior_slope
+    recent = recent[np.isfinite(recent["LapTimeSec"]) & (recent["LapTimeSec"] > 20.0)].tail(n_recent)
     n_obs = len(recent)
     if n_obs < 3:
         return prior_slope, prior_slope
@@ -204,7 +211,12 @@ def run_monte_carlo_decision(
     - safety car occurrence.
     Also validates FIA dry-race two-compound rule (Reg 30.5) and computes break-even laps.
     """
-    np.random.seed(seed)
+    if seed is not None:
+        np.random.seed(int(seed))
+
+    n_sims = max(10, int(n_sims)) if n_sims is not None and np.isfinite(n_sims) else 1000
+    current_lap = max(1, int(current_lap))
+    current_tyre_age = max(0, int(current_tyre_age))
 
     horizon = int(total_race_laps - current_lap)
     if horizon <= 0:

@@ -3,13 +3,13 @@
 **Branch:** `phase-3a-decision-engine`  
 **Execution Environment:** macOS, Python 3.10.12, FastF1 3.8.3  
 **Artifacts Generated:**
-- [`docs/results/phase3a3_results.json`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/docs/results/phase3a3_results.json)
-- [`docs/results/undercut_cases.json`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/docs/results/undercut_cases.json)
-- [`docs/results/undercut_cases.csv`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/docs/results/undercut_cases.csv)
-- [`scripts/run_phase3a3_evaluation.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/scripts/run_phase3a3_evaluation.py)
-- [`tests/test_s1a_known_answer.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/tests/test_s1a_known_answer.py)
-- [`scripts/verify_offline_app_render.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/scripts/verify_offline_app_render.py)
-- [`scripts/export_demo_dataset.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/scripts/export_demo_dataset.py)
+- [`docs/results/phase3a3_results.json`](docs/results/phase3a3_results.json)
+- [`docs/results/undercut_cases.json`](docs/results/undercut_cases.json)
+- [`docs/results/undercut_cases.csv`](docs/results/undercut_cases.csv)
+- [`scripts/run_phase3a3_evaluation.py`](scripts/run_phase3a3_evaluation.py)
+- [`tests/test_s1a_known_answer.py`](tests/test_s1a_known_answer.py)
+- [`scripts/verify_offline_app_render.py`](scripts/verify_offline_app_render.py)
+- [`scripts/export_demo_dataset.py`](scripts/export_demo_dataset.py)
 
 ---
 
@@ -19,7 +19,7 @@
 - **Root Cause Identified:** In the Phase 3A.2 anchor calculation, the anchor was computed as the median of prior clean fuel-adjusted laps in the stint window $[t-k, t]$. While lap times were adjusted for fuel burn back to the reference lap, **they were not adjusted for tyre wear back to the forecast origin lap $t$**.
 - Specifically, the median prior lap had tyre age approximately $\text{age}_t - 4$. Because tyre degradation was missing from the backward anchor projection, the anchor pace was calculated using a tyre that was on average 4 laps fresher than the tyre at lap $t$.
 - Under the physical tyre degradation rate of $c_{\text{deg}} \approx 0.058\text{ s/lap}$, underestimating tyre age by 4 laps made the anchor **$4 \times 0.058\text{ s} = 0.232\text{ s}$ too fast**, producing an exact signed bias of $-0.232\text{ s}$ at $H=1$!
-- **Fix:** Implemented canonical helper `compute_s1a_anchor()` in [`src/features/fuel.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/src/features/fuel.py) that projects prior laps to the forecast origin lap by adjusting for **both** fuel burn and tyre wear:
+- **Fix:** Implemented canonical helper `compute_s1a_anchor()` in [`src/features/fuel.py`](src/features/fuel.py) that projects prior laps to the forecast origin lap by adjusting for **both** fuel burn and tyre wear:
   $$\text{LapPace}_{\text{orig}} = \text{LapTime}_k - c_{\text{fuel}} \cdot (\text{Lap}_k - \text{Lap}_{\text{orig}}) + c_{\text{deg}} \cdot (\text{Age}_{\text{orig}} - \text{Age}_k)$$
 - **Result:** $H=1$ signed bias dropped from $-0.232\text{ s}$ to **$-0.068\text{ s}$** (a 71% bias reduction), and MAE improved from $0.465\text{ s}$ to **$0.375\text{ s}$**.
 
@@ -41,7 +41,7 @@
 *Summary:* The $+5.57\text{ s}$ bias is completely resolved. Predicted gains average $+0.93\text{ s}$ vs actual gains averaging $+0.51\text{ s}$ across these stops, with mean absolute error $< 0.42\text{ s}$.
 
 ### 1c. Known-Answer Synthetic Unit Tests
-Committed unit tests in [`tests/test_s1a_known_answer.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/tests/test_s1a_known_answer.py) verify exact numerical recovery using committed production code:
+Committed unit tests in [`tests/test_s1a_known_answer.py`](tests/test_s1a_known_answer.py) verify exact numerical recovery using committed production code:
 1. `test_s1a_anchor_recovery_zero_bias`: Stint generated with base pace 80.000s, fuel effect 0.058 s/lap, wear 0.040 s/lap. Recovered origin anchor: **$80.0000\text{ s}$** (Error: $\mathbf{0.0000\text{ s}}$).
 2. `test_s1a_horizon_predictions_zero_bias_all_horizons`:
    - $H=1$: Mean Error = $\mathbf{+0.0000\text{ s}}$
@@ -126,7 +126,7 @@ While the decision engine's candidate stop window correctly encompasses 100% of 
 
 ## 4. Undercut Analysis with Real Elapsed Telemetry Gaps
 
-Real gaps were extracted from cumulative race elapsed time on track (FastF1 session elapsed `Time` channel) and exported to [`docs/results/undercut_cases.csv`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/docs/results/undercut_cases.csv).
+Real gaps were extracted from cumulative race elapsed time on track (FastF1 session elapsed `Time` channel) and exported to [`docs/results/undercut_cases.csv`](docs/results/undercut_cases.csv).
 
 - **Total Undercut Opportunities Identified:** 80
 - **Empirical Base Rate:** **32.5%** (26/80) [95% Wilson CI: 23.2%, 43.4%]
@@ -197,11 +197,11 @@ A stricter clean-lap filter decreases eligible stint counts:
    - Produced initially in Phase 1 exploratory analysis via un-normalized ordinary least squares regression without circuit fixed effects or fuel decoupling (commit `b6951b3`).
    - Superseded and permanently removed from active models and documentation in favor of the out-of-fold fuel-decoupled Huber parameters: **Soft $+0.075\text{ s/lap}$**, **Medium $+0.038\text{ s/lap}$**, **Hard $+0.039\text{ s/lap}$**.
 2. **Offline App Execution Verified:**
-   - Ran [`scripts/verify_offline_app_render.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/scripts/verify_offline_app_render.py) with network sockets strictly blocked at the OS connection level.
+   - Ran [`scripts/verify_offline_app_render.py`](scripts/verify_offline_app_render.py) with network sockets strictly blocked at the OS connection level.
    - All 13 Grand Prix events loaded cleanly from the bundled parquet.
    - All three core pages (Tyre Intelligence, Strategy Simulator, Decision Engine) rendered without network calls.
 3. **Branch & PR Order:**
    - `phase-1-analytics` and `phase-2-pace-model` are cleanly integrated into `main`.
    - Branch `phase-3a-decision-engine` contains all Phase 3A.3 commits, tests, and documentation ready for merge.
 4. **Attribution & Terms:**
-   - Updated [`data/demo/ATTRIBUTION.md`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/data/demo/ATTRIBUTION.md) with redistribution notice and documented rebuild script `scripts/export_demo_dataset.py`.
+   - Updated [`data/demo/ATTRIBUTION.md`](data/demo/ATTRIBUTION.md) with redistribution notice and documented rebuild script `scripts/export_demo_dataset.py`.

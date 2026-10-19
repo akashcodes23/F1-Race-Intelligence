@@ -52,7 +52,7 @@
 - **Origin Lap ($t_0$):** Selected without knowing the actual stop lap in advance, evaluated at fixed retrospective horizons: $\Delta \in \{5, 10, 15\}$ laps before the actual stop: $t_0 = L_{\text{act}} - \Delta$.
 - **Window Center ($L^*$):** At lap $t_0$, the decision engine computes remaining race time for candidate stop laps $L_{\text{cand}} \in [t_0 + 1, \min(N_{\text{total}} - 2, t_0 + 35)]$, using only telemetry and pace data up to $t_0$. The window center is $L^* = \arg\min_{L_{\text{cand}}} \text{RemainingRaceTime}(L_{\text{cand}})$.
 - **Window Width ($k$):** Given half-width $k$, the recommended window is $[L^* - k, L^* + k]$, with width $W = 2k + 1$ laps. Mean and median window width for any half-width $k$ is exactly $2k + 1$ laps (e.g. for $k=2$, width is exactly 5 laps).
-- **Leakage Invariance Proof:** No future lap times, actual stop laps, or post-$t_0$ race states enter the objective function. A formal unit test ([`test_stop_timing_leakage_invariance`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/tests/test_decision_engine.py#L211-L260)) was added to ensure shifting the actual ground-truth stop lap produces bit-for-bit identical window centers and recommendations.
+- **Leakage Invariance Proof:** No future lap times, actual stop laps, or post-$t_0$ race states enter the objective function. A formal unit test ([`test_stop_timing_leakage_invariance`](tests/test_decision_engine.py#L211-L260)) was added to ensure shifting the actual ground-truth stop lap produces bit-for-bit identical window centers and recommendations.
 
 ### 2. Mean Absolute Stop-Lap Error
 | Origin ($\Delta = L_{\text{act}} - t_0$) | Sample ($N$) | Engine MAE (laps) | Circuit Median MAE (laps) | Stint Heuristic MAE (laps) |
@@ -154,7 +154,7 @@
 | **21 – 30 laps** | 34 | **+0.840 s** | +0.897 s | [+0.664, +1.238] | 0.795 s |
 | **31+ laps** | 12 | **+0.785 s** | +0.727 s | [+0.550, +1.258] | 0.539 s |
 
-*Scatter Plot:* Generated and saved to [`docs/results/pit_gain_vs_tyre_age.png`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/docs/results/pit_gain_vs_tyre_age.png).
+*Scatter Plot:* Generated and saved to [`docs/results/pit_gain_vs_tyre_age.png`](docs/results/pit_gain_vs_tyre_age.png).
 
 ### 2. Spearman Rank Correlation & Orientation
 - **Spearman Correlation ($\text{pre\_age}$ vs $\text{gain}$):** **$+0.058$** ($p = 0.46$).
@@ -234,7 +234,7 @@ Fitted per compound on training races only:
    - **Nominal Level:** 90.0% nominal interval coverage (empirical coverage = 90.7%).
 
 3. **Offline Network Blocking Code:**
-   In [`scripts/verify_offline_app_render.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/scripts/verify_offline_app_render.py#L8-L16):
+   In [`scripts/verify_offline_app_render.py`](scripts/verify_offline_app_render.py#L8-L16):
    ```python
    import socket
 

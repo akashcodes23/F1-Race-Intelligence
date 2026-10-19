@@ -55,6 +55,48 @@ class TestDriverComparison(unittest.TestCase):
         self.assertIn("optimal_lap", summary["VER"])
         self.assertAlmostEqual(summary["VER"]["optimal_lap"], 80.0)
 
+    def test_compute_leader_gap_proxy_lead_lap(self):
+        from src.driver_comparison import compute_leader_gap_proxy
+        df = compute_leader_gap_proxy(self.laps, current_lap=10, reference_lap_time=80.0)
+        self.assertFalse(df.empty)
+        leader_row = df.iloc[0]
+        self.assertEqual(leader_row["driver"], "VER")
+        self.assertEqual(leader_row["gap_to_lead_s"], 0.0)
+        self.assertEqual(leader_row["gap_display"], "LEADER")
+        self.assertEqual(leader_row["status"], "LEADER")
+
+        ham_row = df[df["driver"] == "HAM"].iloc[0]
+        self.assertEqual(ham_row["status"], "ON_LEAD_LAP")
+        self.assertFalse(ham_row["is_lapped"])
+        self.assertTrue(ham_row["gap_to_lead_s"] > 0)
+        self.assertTrue(ham_row["gap_display"].startswith("+"))
+
+    def test_compute_leader_gap_proxy_lapped_and_out(self):
+        from src.driver_comparison import compute_leader_gap_proxy
+        # Add a lapped car (NOR with 8 laps) and a retired car (ALO with 0 laps)
+        laps_nor = pd.DataFrame({
+            "Driver": ["NOR"] * 8,
+            "LapNumber": list(range(1, 9)),
+            "LapTimeSec": [82.0] * 8,
+            "Position": [3] * 8,
+        })
+        laps_alo = pd.DataFrame({
+            "Driver": ["ALO"] * 1,
+            "LapNumber": [1],
+            "LapTimeSec": pd.Series([float("nan")], dtype="float64"),
+            "Position": [20],
+        })
+        extended_laps = pd.concat([self.laps, laps_nor, laps_alo], ignore_index=True)
+
+        df = compute_leader_gap_proxy(extended_laps, current_lap=10, reference_lap_time=80.0)
+        nor_row = df[df["driver"] == "NOR"].iloc[0]
+        self.assertTrue(nor_row["is_lapped"])
+        self.assertEqual(nor_row["status"], "LAPPED")
+        self.assertEqual(nor_row["gap_display"], "+2 LAPS")
+
+        alo_row = df[df["driver"] == "ALO"].iloc[0]
+        self.assertIn(alo_row["status"], ["INCOMPLETE_DATA", "OUT"])
+
 
 if __name__ == "__main__":
     unittest.main()

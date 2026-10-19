@@ -51,14 +51,14 @@ In a clean, isolated virtual environment, the latest release **`fastf1==3.8.3`**
 
 To guarantee 100% application reliability on hosted environments (Streamlit Community Cloud) independent of live external network state or upstream authentication barriers, the application ships with a bundled, pre-processed offline demo dataset:
 
-- **File Location:** [`data/demo/demo_laps.parquet`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/data/demo/demo_laps.parquet)
+- **File Location:** `data/demo/demo_laps.parquet`
 - **Size:** **0.79 MB** (828,564 bytes), well below the 10 MB budget.
 - **Coverage:** **12,012 cleaned laps across 13 Grand Prix events**:
   - **2021:** Austrian, Bahrain, British, Italian, Spanish, US Grand Prix.
   - **2022:** Austrian, Bahrain, British, French, Italian, Spanish Grand Prix.
   - **2023:** Monaco Grand Prix.
-- **Attribution & Terms:** Fully documented in [`data/demo/ATTRIBUTION.md`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/data/demo/ATTRIBUTION.md).
-- **Offline Ingestion:** [`src/data/loader.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/src/data/loader.py) and [`src/data_loader.py`](file:///Users/akashgpatil/F1-Race-Intelligence/F1-Race-Intelligence/src/data_loader.py) implement `get_demo_races()` and `load_demo_laps()`. When live API fetching fails or when running offline, the application seamlessly serves data from this bundled repository.
+- **Attribution & Terms:** Fully documented in `data/demo/ATTRIBUTION.md`.
+- **Offline Ingestion:** `src/data/loader.py` and `src/data_loader.py` implement `get_demo_races()` and `load_demo_laps()`. When live API fetching fails or when running offline, the application seamlessly serves data from this bundled repository.
 
 ---
 

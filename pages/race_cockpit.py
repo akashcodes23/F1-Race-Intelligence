@@ -22,6 +22,7 @@ from src.decision_engine import (  # noqa: E402
     evaluate_undercut_overcut,
     run_monte_carlo_decision,
 )
+from src.driver_comparison import compute_leader_gap_proxy  # noqa: E402
 from src.visualization.audio import (  # noqa: E402
     play_caution_warning,
     play_pit_radio_chime,
@@ -107,64 +108,27 @@ def render_race_cockpit(session_obj: Any, laps_df: Optional[pd.DataFrame], meta:
     # ─── 3D Circuit & Telemetry Viewport ──────────────────────────
     track_engine = Track3DEngine(circuit_name=circuit_name, elevation_scale=2.0)
 
-    # Determine driver standings up to current lap
-    drivers_list = sorted(laps_df["Driver"].dropna().unique().tolist())
-    driver_lap_data = []
-
-    # Calculate leader cumulative race time to derive authentic physical gaps [DERIVED]
-    cum_times: Dict[str, float] = {}
-    completed_laps_map: Dict[str, int] = {}
-    for d in drivers_list:
-        d_laps = laps_df[(laps_df["Driver"] == d) & (laps_df["LapNumber"] <= current_lap)]
-        if not d_laps.empty:
-            last_lap = d_laps.iloc[-1]
-            pos = int(last_lap.get("Position", 10)) if pd.notna(last_lap.get("Position")) else 10
-            team = str(last_lap.get("Team", "Red Bull Racing"))
-            comp = str(last_lap.get("Compound", "MEDIUM"))
-            tyre_life = int(last_lap.get("TyreLife", current_lap)) if pd.notna(last_lap.get("TyreLife")) else current_lap
-
-            # Cumulative elapsed time from observed lap times [DERIVED]
-            valid_lap_times = d_laps["LapTimeSec"].dropna()
-            cum_time = float(valid_lap_times.sum()) if not valid_lap_times.empty else 0.0
-            cum_times[d] = cum_time
-            completed_laps_map[d] = int(d_laps["LapNumber"].max())
-
-            driver_lap_data.append({
-                "driver": d,
-                "position": pos,
-                "team": team,
-                "compound": comp,
-                "tyre_life": tyre_life,
-                "cum_time": cum_time,
-                "last_lap_num": int(last_lap.get("LapNumber", current_lap)),
-            })
-
-    driver_lap_data.sort(key=lambda x: x["position"])
-
     # Determine reference lap time from race leader for spatial projection
-    leader_cum_time = driver_lap_data[0]["cum_time"] if driver_lap_data else 0.0
     ref_lap_time = 90.0
     if not clean_df.empty and "LapTimeSec" in clean_df.columns:
         med_time = float(clean_df["LapTimeSec"].median())
         if 50.0 <= med_time <= 140.0:
             ref_lap_time = med_time
 
-    # Compute deterministic gaps [DERIVED] relative to leader
-    for idx, d in enumerate(driver_lap_data):
-        if idx == 0:
-            d["gap_to_lead_s"] = 0.0
-        else:
-            if d["last_lap_num"] == current_lap and d["cum_time"] > 0 and leader_cum_time > 0:
-                d["gap_to_lead_s"] = max(0.0, round(d["cum_time"] - leader_cum_time, 2))
-            else:
-                # Driver is lapped or has fewer laps: calculate lap deficit [DERIVED]
-                lap_deficit = current_lap - d["last_lap_num"]
-                d["gap_to_lead_s"] = max(0.0, round(lap_deficit * ref_lap_time + max(0.0, d["cum_time"] - leader_cum_time), 2))
+    # Determine driver standings up to current lap with deterministic timing proxy [DERIVED]
+    drivers_list = sorted(laps_df["Driver"].dropna().unique().tolist())
+    gap_df = compute_leader_gap_proxy(laps_df, current_lap=current_lap, reference_lap_time=ref_lap_time)
+    driver_lap_data = gap_df.to_dict(orient="records") if not gap_df.empty else []
 
     top_drivers_3d = driver_lap_data[:10]  # Top 10 for 3D track markers
     cars_3d = track_engine.interpolate_car_positions(top_drivers_3d, lap_progress=lap_progress, lap_time_ref_sec=ref_lap_time)
 
-    st.caption("ℹ️ **[SIMULATED]** 3D Circuit geometry interpolated from reference track waypoints. Spatial car positions projected along spline from deterministic lap progress & cumulative timing gaps.")
+    st.caption(
+        "ℹ️ **[SIMULATED]** 3D Circuit geometry interpolated from reference track waypoints. "
+        "Car positions along spline are projected from current lap progress and elapsed timing gap proxies. "
+        "**Timing Note:** Gaps represent Completed-Lap Elapsed Delta Proxies or official lap deficits (+1 LAP), "
+        "NOT continuous sector transponder deltas."
+    )
 
     if "Three.js" in view_mode:
         threejs_html = track_engine.generate_threejs_html(cars_3d, height=520)
@@ -172,6 +136,22 @@ def render_race_cockpit(session_obj: Any, laps_df: Optional[pd.DataFrame], meta:
     else:
         fig_3d = track_engine.generate_plotly_3d(cars_3d)
         st.plotly_chart(fig_3d, use_container_width=True)
+
+    with st.expander("📋 View Standings & Timing Gap Proxies [DERIVED]"):
+        if not gap_df.empty:
+            display_cols = ["position", "driver", "team", "compound", "tyre_life", "completed_laps", "gap_display", "status"]
+            renamed_cols = {
+                "position": "Pos",
+                "driver": "Driver",
+                "team": "Team",
+                "compound": "Tyre",
+                "tyre_life": "Tyre Age",
+                "completed_laps": "Laps",
+                "gap_display": "Gap to Leader (Proxy)",
+                "status": "Timing Status",
+            }
+            show_df = gap_df[[c for c in display_cols if c in gap_df.columns]].rename(columns=renamed_cols)
+            st.dataframe(show_df, use_container_width=True, hide_index=True)
 
     st.divider()
 

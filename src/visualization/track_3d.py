@@ -308,7 +308,8 @@ class Track3DEngine:
             name = drv.get("driver", "DRV")
             team = drv.get("team", "Red Bull Racing")
             pos = drv.get("position", 1)
-            gap_s = drv.get("gap_to_lead_s", 0.0)
+            raw_gap = drv.get("gap_to_lead_s")
+            gap_s = float(raw_gap) if raw_gap is not None and pd.notna(raw_gap) else 0.0
 
             # Convert gap in seconds into spatial lap offset using reference lap time [DERIVED]
             spatial_lag = (gap_s / ref_time) % 1.0

@@ -93,6 +93,60 @@ class TestTrack3DEngine(unittest.TestCase):
         self.assertIn("Cockpit Chase", html)
         self.assertIn("VER", html)
 
+    def test_multiple_circuits_and_lap_times(self):
+        circuits_to_test = ["Monaco Grand Prix", "Austrian Grand Prix", "British Grand Prix", "Italian Grand Prix"]
+        for c_name in circuits_to_test:
+            engine = Track3DEngine(circuit_name=c_name, elevation_scale=1.5, num_spline_points=300)
+            df = engine.track_df
+            self.assertEqual(len(df), 300)
+            self.assertTrue(df["speed"].between(60.0, 360.0).all())
+
+            # Test spatial lag scaling across different reference lap times (70s vs 105s)
+            drivers = [
+                {"driver": "P1", "position": 1, "team": "Ferrari", "gap_to_lead_s": 0.0},
+                {"driver": "P2", "position": 2, "team": "Mercedes", "gap_to_lead_s": 7.0},
+            ]
+            cars_short_lap = engine.interpolate_car_positions(drivers, lap_progress=0.5, lap_time_ref_sec=70.0)
+            cars_long_lap = engine.interpolate_car_positions(drivers, lap_progress=0.5, lap_time_ref_sec=105.0)
+
+            # In shorter lap, 7.0s gap covers larger fraction of the track (10%) than in longer lap (6.67%)
+            lag_short = (cars_short_lap[0]["progress"] - cars_short_lap[1]["progress"]) % 1.0
+            lag_long = (cars_long_lap[0]["progress"] - cars_long_lap[1]["progress"]) % 1.0
+            self.assertGreater(lag_short, lag_long)
+
+    def test_interpolate_car_positions_edge_cases(self):
+        engine = self.engine
+        # 1. Zero gaps
+        zero_gap_drivers = [
+            {"driver": "VER", "position": 1, "gap_to_lead_s": 0.0},
+            {"driver": "PER", "position": 2, "gap_to_lead_s": 0.0},
+        ]
+        cars_zero = engine.interpolate_car_positions(zero_gap_drivers, lap_progress=0.25)
+        self.assertEqual(cars_zero[0]["progress"], cars_zero[1]["progress"])
+
+        # 2. Large gaps (wrapping around the track)
+        large_gap_drivers = [
+            {"driver": "VER", "position": 1, "gap_to_lead_s": 0.0},
+            {"driver": "LAT", "position": 20, "gap_to_lead_s": 95.5},  # > 90s lap time
+        ]
+        cars_large = engine.interpolate_car_positions(large_gap_drivers, lap_progress=0.10, lap_time_ref_sec=90.0)
+        self.assertEqual(len(cars_large), 2)
+        self.assertTrue(0.0 <= cars_large[1]["progress"] <= 1.0)
+
+        # 3. Missing/None gap or missing fields
+        missing_data_drivers = [
+            {"driver": "VER", "position": 1, "gap_to_lead_s": None},
+            {"driver": "HAM"},
+        ]
+        cars_missing = engine.interpolate_car_positions(missing_data_drivers, lap_progress=0.35)
+        self.assertEqual(len(cars_missing), 2)
+        self.assertIn("progress", cars_missing[0])
+        self.assertIn("progress", cars_missing[1])
+
+        # 4. Empty driver list
+        cars_empty = engine.interpolate_car_positions([], lap_progress=0.5)
+        self.assertEqual(cars_empty, [])
+
 
 if __name__ == "__main__":
     unittest.main()

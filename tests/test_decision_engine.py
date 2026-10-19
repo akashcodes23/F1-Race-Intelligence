@@ -263,6 +263,40 @@ class TestDecisionEngine(unittest.TestCase):
         self.assertIn("sc_prob_+10pct", res_scenario_a.sensitivity)
         self.assertIn("sc_prob_-10pct", res_scenario_a.sensitivity)
 
+    def test_decision_engine_invalid_and_nonfinite_inputs(self):
+        # 1. Non-finite values in recent laps
+        nonfinite_laps = pd.DataFrame({
+            "LapNumber": [1, 2, 3, 4, 5],
+            "LapTimeSec": [80.0, float("inf"), float("nan"), -5.0, 81.2],
+            "Compound": ["MEDIUM"] * 5,
+        })
+        res_nonfinite = run_monte_carlo_decision(
+            current_lap=5,
+            total_race_laps=30,
+            recent_laps=nonfinite_laps,
+            current_compound="MEDIUM",
+            new_compound="HARD",
+            current_tyre_age=-5,  # negative age
+            n_sims=0,             # invalid n_sims
+            seed=42,
+        )
+        self.assertTrue(pd.notna(res_nonfinite.expected_net_gain_sec))
+        self.assertTrue(pd.notna(res_nonfinite.prob_pit_beats_stay))
+        self.assertIn(res_nonfinite.verdict, ["PIT NOW", "STAY OUT", "INCONCLUSIVE"])
+
+        # 2. Race completed horizon <= 0
+        res_done = run_monte_carlo_decision(
+            current_lap=50,
+            total_race_laps=50,
+            recent_laps=self.synthetic_laps,
+            current_compound="MEDIUM",
+            new_compound="HARD",
+            current_tyre_age=15,
+            seed=42,
+        )
+        self.assertEqual(res_done.verdict, "STAY OUT")
+        self.assertEqual(res_done.prob_pit_beats_stay, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
