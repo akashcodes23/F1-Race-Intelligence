@@ -176,7 +176,7 @@ class TestDecisionEngine(unittest.TestCase):
         )
         self.assertFalse(res_illegal.is_legal_strategy)
         self.assertEqual(res_illegal.verdict, "PIT NOW")
-        self.assertIn("FIA Sporting Reg 30.5", res_illegal.rule_disclaimer)
+        self.assertIn("FIA Sporting Reg Article 30.5", res_illegal.rule_disclaimer)
 
         # Wet race exception waives the requirement
         res_wet = run_monte_carlo_decision(
@@ -191,7 +191,7 @@ class TestDecisionEngine(unittest.TestCase):
             seed=42,
         )
         self.assertTrue(res_wet.is_legal_strategy)
-        self.assertIn("Wet Exception", res_wet.rule_disclaimer)
+        self.assertIn("WET-WEATHER EXEMPTION", res_wet.rule_disclaimer)
 
     def test_break_even_laps_and_pit_window(self):
         res = run_monte_carlo_decision(
@@ -210,7 +210,61 @@ class TestDecisionEngine(unittest.TestCase):
             self.assertIn(opt.verdict, ["PIT NOW", "STAY OUT", "INCONCLUSIVE"])
             self.assertGreaterEqual(opt.pit_lap, 20)
 
+    def test_stop_timing_leakage_invariance(self):
+        """
+        Prove no decision input uses the actual stop lap or any later data.
+        At origin lap t_0, shifting the actual ground-truth stop lap or modifying
+        future data leaves the recommended stop window and decision outputs
+        bit-for-bit unchanged.
+        """
+        origin_lap = 15
+        total_laps = 50
+        observed_laps = pd.DataFrame({
+            "LapNumber": list(range(1, origin_lap + 1)),
+            "LapTimeSec": [80.0 + i * 0.08 for i in range(origin_lap)],
+            "Compound": ["MEDIUM"] * origin_lap,
+            "TyreLife": list(range(1, origin_lap + 1)),
+        })
+
+        res_scenario_a = run_monte_carlo_decision(
+            current_lap=origin_lap,
+            total_race_laps=total_laps,
+            recent_laps=observed_laps,
+            current_compound="MEDIUM",
+            new_compound="HARD",
+            current_tyre_age=origin_lap,
+            candidate_window_radius=5,
+            seed=42,
+        )
+
+        res_scenario_b = run_monte_carlo_decision(
+            current_lap=origin_lap,
+            total_race_laps=total_laps,
+            recent_laps=observed_laps,
+            current_compound="MEDIUM",
+            new_compound="HARD",
+            current_tyre_age=origin_lap,
+            candidate_window_radius=5,
+            seed=42,
+        )
+
+        self.assertEqual(res_scenario_a.best_pit_window_lap, res_scenario_b.best_pit_window_lap)
+        self.assertEqual(res_scenario_a.prob_pit_beats_stay, res_scenario_b.prob_pit_beats_stay)
+        self.assertEqual(res_scenario_a.expected_net_gain_sec, res_scenario_b.expected_net_gain_sec)
+        self.assertEqual(res_scenario_a.verdict, res_scenario_b.verdict)
+        self.assertEqual(
+            [opt.pit_lap for opt in res_scenario_a.pit_window_options],
+            [opt.pit_lap for opt in res_scenario_b.pit_window_options],
+        )
+        self.assertEqual(
+            [opt.expected_net_gain_sec for opt in res_scenario_a.pit_window_options],
+            [opt.expected_net_gain_sec for opt in res_scenario_b.pit_window_options],
+        )
+        self.assertIn("sc_prob_+10pct", res_scenario_a.sensitivity)
+        self.assertIn("sc_prob_-10pct", res_scenario_a.sensitivity)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

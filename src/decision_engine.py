@@ -50,8 +50,10 @@ CIRCUIT_SC_PROB_PER_LAP: Dict[str, float] = {
 }
 DEFAULT_SC_PROB_PER_LAP = 0.0700
 
-# Estimated pit-loss discount under SC/VSC (assumed from delta pace on track)
-ASSUMED_SC_DISCOUNT_SEC = 9.50
+# Estimated pit-loss discount under SC/VSC (Engineering assumption, not empirical)
+ASSUMED_SC_DISCOUNT_SEC = 9.50  # Assumption: pit loss reduced by delta pace under SC/VSC
+ASSUMED_SC_DISCOUNT_STATUS = "assumed (engineering estimate based on delta pace, not empirically calibrated)"
+
 
 
 @dataclass
@@ -247,22 +249,25 @@ def run_monte_carlo_decision(
         if not has_wet_tyres and not will_use_two:
             is_legal_strategy = False
             rule_disclaimer = (
-                "ILLEGAL STRATEGY WARNING (FIA Sporting Reg 30.5): In a dry race, each driver must "
-                f"use at least two different dry compound specifications. Staying on '{current_compound.upper()}' "
-                "without switching to another dry compound violates regulations unless rain occurs."
+                "MANDATORY COMPOUND REQUIREMENT (FIA Sporting Reg Article 30.5(n)): The driver must have "
+                "used two different dry compounds by the end of a dry race, so a stop is required by then "
+                f"(unless the wet-weather tyre exemption applies). Staying on '{current_compound.upper()}' "
+                "without switching to another dry compound is not permitted."
             )
         else:
             is_legal_strategy = True
             rule_disclaimer = (
-                "LEGAL STRATEGY: Meets FIA Sporting Reg 30.5 compound specification requirement."
+                "COMPOUND REQUIREMENT SATISFIED (FIA Sporting Reg Article 30.5(n)): The driver must have used two different "
+                "dry compounds by the end of a dry race, and the planned strategy satisfies this requirement."
                 if not has_wet_tyres
-                else "LEGAL STRATEGY (Wet Exception): Mandatory two-compound dry rule waived due to wet/intermediate conditions."
+                else "WET-WEATHER EXEMPTION (FIA Sporting Reg Article 30.5(n)): The mandatory two-compound dry rule "
+                "is waived when intermediate or wet-weather tyres are used."
             )
     else:
         is_legal_strategy = True
         rule_disclaimer = (
-            "COMPOUND STATUS UNCONSTRAINED: Prior stint compound history is unobserved; "
-            "verifying FIA Reg 30.5 requires full-race stint history."
+            "COMPOUND STATUS UNCONSTRAINED (FIA Sporting Reg Article 30.5(n)): The driver must have used two different dry "
+            "compounds by the end of a dry race; verifying compliance requires full-race stint history."
         )
 
     # Simulate Pit Now vs Stay Out
@@ -382,12 +387,15 @@ def run_monte_carlo_decision(
 
     # Sensitivity Analysis
     sensitivity = {
-        "pit_loss_+3s": expected_gain - 3.0,
-        "pit_loss_-3s": expected_gain + 3.0,
-        "pace_gain_+0.5s": expected_gain + (0.5 * horizon),
-        "pace_gain_-0.5s": expected_gain - (0.5 * horizon),
-        "trend_+0.03s_per_lap": expected_gain + (0.03 * horizon * (horizon + 1) / 4.0),
-        "trend_-0.03s_per_lap": expected_gain - (0.03 * horizon * (horizon + 1) / 4.0),
+        "pit_loss_+3s": round(expected_gain - 3.0, 2),
+        "pit_loss_-3s": round(expected_gain + 3.0, 2),
+        "pace_gain_+0.5s": round(expected_gain + (0.5 * horizon), 2),
+        "pace_gain_-0.5s": round(expected_gain - (0.5 * horizon), 2),
+        "trend_+0.03s_per_lap": round(expected_gain + (0.03 * horizon * (horizon + 1) / 4.0), 2),
+        "trend_-0.03s_per_lap": round(expected_gain - (0.03 * horizon * (horizon + 1) / 4.0), 2),
+        "sc_prob_+10pct": round(expected_gain + (0.10 * ASSUMED_SC_DISCOUNT_SEC), 2),
+        "sc_prob_-10pct": round(expected_gain - (min(sc_prob, 0.10) * ASSUMED_SC_DISCOUNT_SEC), 2),
+        "sc_discount_note": "Safety-car discount (9.50s) is an engineering assumption, not empirically calibrated.",
     }
 
     return DecisionOutput(
