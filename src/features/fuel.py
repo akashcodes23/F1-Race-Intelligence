@@ -257,6 +257,69 @@ def predict_fuel_pace(
     return anchor_pace_sec - fuel_effect_sec_per_lap * horizon_laps
 
 
+def compute_s1a_anchor(
+    recent_laps: pd.DataFrame,
+    origin_lap: float,
+    origin_tyre_age: float,
+    compound_deg_slope: float,
+    fuel_effect_sec_per_lap: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP,
+    n_prior_laps: int = 5,
+) -> float:
+    """
+    Compute anchor pace at origin_lap and origin_tyre_age from recent clean stint laps.
+
+    Normalizes prior laps to BOTH:
+      1. origin_lap fuel load: + fuel_effect * (lap_k - origin_lap)
+      2. origin_tyre_age tyre degradation: + compound_deg_slope * (origin_tyre_age - age_k)
+    This prevents off-by-k tyre wear bias when averaging across prior stint laps.
+    """
+    if recent_laps is None or recent_laps.empty:
+        return 80.0
+    time_col = "RelativeLapTimeSec" if "RelativeLapTimeSec" in recent_laps.columns else "LapTimeSec"
+    clean = recent_laps.dropna(subset=[time_col]).tail(n_prior_laps).copy()
+    if clean.empty:
+        return 80.0
+    laps = clean["LapNumber"].values
+    ages = clean["TyreLife"].values if "TyreLife" in clean.columns else (laps - laps.min() + 1.0)
+    raw_times = clean[time_col].values
+
+    # Fuel norm: laps before origin_lap were heavier, so normalizing to origin_lap fuel subtracts fuel penalty
+    fuel_adj = fuel_effect_sec_per_lap * (laps - origin_lap)
+    # Wear norm: laps before origin_lap had less tyre wear, so normalizing to origin_tyre_age adds missing wear
+    wear_adj = compound_deg_slope * (origin_tyre_age - ages)
+
+    anchor_vals = raw_times + fuel_adj + wear_adj
+    return float(np.median(anchor_vals))
+
+
+def predict_s1a_pit_pace_gain(
+    compound_pre: str,
+    compound_post: str,
+    pre_tyre_age: float,
+    post_tyre_age: float,
+    compound_offsets: Dict[str, float],
+    compound_slopes: Dict[str, float],
+) -> float:
+    """
+    Predict fuel-normalized pit pace gain (gain = pre_pace - post_pace).
+    Positive gain means driver is faster after the pit stop.
+
+    Formula:
+      Gain = (Offset_pre - Offset_post) + (slope_pre * pre_age - slope_post * post_age)
+    """
+    c1 = str(compound_pre).upper()
+    c2 = str(compound_post).upper()
+    off1 = compound_offsets.get(c1, 0.0)
+    off2 = compound_offsets.get(c2, 0.0)
+    s1 = compound_slopes.get(c1, 0.04)
+    s2 = compound_slopes.get(c2, 0.04)
+
+    # Offset gain: if c2 is faster (e.g. Soft vs Hard), off2 < off1, so off1 - off2 > 0
+    offset_gain = off1 - off2
+    wear_gain = s1 * pre_tyre_age - s2 * post_tyre_age
+    return float(offset_gain + wear_gain)
+
+
 def predict_s1a_lap_pace(
     anchor_pace_sec: float,
     horizon_laps: int,
@@ -275,6 +338,7 @@ def predict_s1a_lap_pace(
     steps = np.arange(1, horizon_laps + 1)
     net_slope = compound_deg_slope - fuel_effect_sec_per_lap
     return anchor_pace_sec + net_slope * steps
+
 
 
 def apply_fuel_correction(

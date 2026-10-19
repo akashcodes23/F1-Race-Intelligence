@@ -1,0 +1,394 @@
+{
+  "s1a_bug_audit": {
+    "h1_bias_explanation": "Prior stint laps were normalized for fuel but lacked tyre age adjustment, underestimating anchor degradation by 4 laps of wear (4 * 0.058 = 0.232s).",
+    "pit_gain_bias_explanation": "Raw LapTimeSec was pooled across circuits with different lap lengths (Monaco 75s vs Spa 105s), producing artificial negative slopes (-0.29 s/lap) and +8.4s degradation differences.",
+    "stop_examples": [
+      {
+        "stop_index": 1,
+        "race": "2021_Austrian_Grand_Prix",
+        "driver": "ALO",
+        "transition": "MEDIUM->HARD",
+        "pre_age": 31.0,
+        "post_age": 2.0,
+        "offset_component_s": -0.096,
+        "degradation_component_s": 1.105,
+        "fuel_term_s": 0.0,
+        "predicted_gain_s": 1.009,
+        "actual_gain_s": 0.905,
+        "error_s": 0.104
+      },
+      {
+        "stop_index": 2,
+        "race": "2021_Austrian_Grand_Prix",
+        "driver": "BOT",
+        "transition": "MEDIUM->HARD",
+        "pre_age": 32.0,
+        "post_age": 2.0,
+        "offset_component_s": -0.096,
+        "degradation_component_s": 1.143,
+        "fuel_term_s": 0.0,
+        "predicted_gain_s": 1.047,
+        "actual_gain_s": 0.499,
+        "error_s": 0.548
+      },
+      {
+        "stop_index": 3,
+        "race": "2021_Austrian_Grand_Prix",
+        "driver": "GAS",
+        "transition": "SOFT->HARD",
+        "pre_age": 15.0,
+        "post_age": 2.0,
+        "offset_component_s": -0.548,
+        "degradation_component_s": 1.048,
+        "fuel_term_s": 0.0,
+        "predicted_gain_s": 0.5,
+        "actual_gain_s": -0.137,
+        "error_s": 0.637
+      },
+      {
+        "stop_index": 4,
+        "race": "2021_Austrian_Grand_Prix",
+        "driver": "GAS",
+        "transition": "HARD->HARD",
+        "pre_age": 31.0,
+        "post_age": 2.0,
+        "offset_component_s": 0.0,
+        "degradation_component_s": 1.122,
+        "fuel_term_s": 0.0,
+        "predicted_gain_s": 1.122,
+        "actual_gain_s": 0.531,
+        "error_s": 0.592
+      },
+      {
+        "stop_index": 5,
+        "race": "2021_Austrian_Grand_Prix",
+        "driver": "GIO",
+        "transition": "HARD->HARD",
+        "pre_age": 27.0,
+        "post_age": 2.0,
+        "offset_component_s": 0.0,
+        "degradation_component_s": 0.968,
+        "fuel_term_s": 0.0,
+        "predicted_gain_s": 0.968,
+        "actual_gain_s": 0.777,
+        "error_s": 0.19
+      }
+    ],
+    "horizon_gate_rerun": [
+      {
+        "horizon": 1,
+        "N": 1347,
+        "pers_per_lap_mae": 0.344,
+        "pers_per_lap_mae_ci": [
+          0.309,
+          0.379
+        ],
+        "s1a_per_lap_mae": 0.375,
+        "s1a_per_lap_mae_ci": [
+          0.329,
+          0.424
+        ],
+        "diff_per_lap_mae": 0.032,
+        "diff_per_lap_mae_ci": [
+          0.011,
+          0.057
+        ],
+        "pers_cum_abs": 0.344,
+        "s1a_cum_abs": 0.375,
+        "diff_cum_abs": 0.032,
+        "diff_cum_abs_ci": [
+          0.011,
+          0.057
+        ],
+        "pers_abs_cum_signed": 0.344,
+        "s1a_abs_cum_signed": 0.375,
+        "diff_abs_cum_signed": 0.032,
+        "diff_abs_cum_signed_ci": [
+          0.011,
+          0.057
+        ],
+        "pers_bias": 0.006,
+        "s1a_bias": -0.068,
+        "verdict": "Persistence beats"
+      },
+      {
+        "horizon": 5,
+        "N": 1156,
+        "pers_per_lap_mae": 0.523,
+        "pers_per_lap_mae_ci": [
+          0.454,
+          0.607
+        ],
+        "s1a_per_lap_mae": 0.564,
+        "s1a_per_lap_mae_ci": [
+          0.49,
+          0.644
+        ],
+        "diff_per_lap_mae": 0.041,
+        "diff_per_lap_mae_ci": [
+          0.015,
+          0.066
+        ],
+        "pers_cum_abs": 2.217,
+        "s1a_cum_abs": 2.362,
+        "diff_cum_abs": 0.146,
+        "diff_cum_abs_ci": [
+          0.065,
+          0.231
+        ],
+        "pers_abs_cum_signed": 1.925,
+        "s1a_abs_cum_signed": 2.096,
+        "diff_abs_cum_signed": 0.17,
+        "diff_abs_cum_signed_ci": [
+          0.069,
+          0.262
+        ],
+        "pers_bias": -0.093,
+        "s1a_bias": -0.533,
+        "verdict": "Persistence beats"
+      },
+      {
+        "horizon": 10,
+        "N": 825,
+        "pers_per_lap_mae": 0.639,
+        "pers_per_lap_mae_ci": [
+          0.553,
+          0.735
+        ],
+        "s1a_per_lap_mae": 0.713,
+        "s1a_per_lap_mae_ci": [
+          0.606,
+          0.832
+        ],
+        "diff_per_lap_mae": 0.074,
+        "diff_per_lap_mae_ci": [
+          0.003,
+          0.147
+        ],
+        "pers_cum_abs": 5.162,
+        "s1a_cum_abs": 5.506,
+        "diff_cum_abs": 0.344,
+        "diff_cum_abs_ci": [
+          0.014,
+          0.664
+        ],
+        "pers_abs_cum_signed": 4.407,
+        "s1a_abs_cum_signed": 4.794,
+        "diff_abs_cum_signed": 0.387,
+        "diff_abs_cum_signed_ci": [
+          -0.019,
+          0.782
+        ],
+        "pers_bias": -0.01,
+        "s1a_bias": -1.245,
+        "verdict": "Persistence beats"
+      },
+      {
+        "horizon": 20,
+        "N": 254,
+        "pers_per_lap_mae": 0.887,
+        "pers_per_lap_mae_ci": [
+          0.698,
+          1.108
+        ],
+        "s1a_per_lap_mae": 0.89,
+        "s1a_per_lap_mae_ci": [
+          0.637,
+          1.174
+        ],
+        "diff_per_lap_mae": 0.003,
+        "diff_per_lap_mae_ci": [
+          -0.128,
+          0.189
+        ],
+        "pers_cum_abs": 13.499,
+        "s1a_cum_abs": 13.277,
+        "diff_cum_abs": -0.222,
+        "diff_cum_abs_ci": [
+          -1.413,
+          1.405
+        ],
+        "pers_abs_cum_signed": 11.707,
+        "s1a_abs_cum_signed": 11.287,
+        "diff_abs_cum_signed": -0.42,
+        "diff_abs_cum_signed_ci": [
+          -1.586,
+          1.295
+        ],
+        "pers_bias": 2.401,
+        "s1a_bias": -1.779,
+        "verdict": "TIE (CI contains zero)"
+      }
+    ]
+  },
+  "pit_gain_target": {
+    "sign_convention": "gain = pre_pace - post_pace (positive = faster on new tyres)",
+    "fuel_shift_formula": "2 * fuel_effect * (d_pre + d_post) = 2 * 0.058 * 8.8 = +1.02s shift",
+    "filter_reconciliation": [
+      {
+        "filter": "Total raw stint transitions (multi-stint drivers in demo archive)",
+        "stops": 439,
+        "excluded": 0
+      },
+      {
+        "filter": "Drop wet/intermediate compound transitions (INTERMEDIATE, WET)",
+        "stops": 393,
+        "excluded": 46
+      },
+      {
+        "filter": "Require >= 2 clean pre-laps and >= 2 clean post-laps in window [L-4, L+10]",
+        "stops": 366,
+        "excluded": 27
+      },
+      {
+        "filter": "Strict window [L-4, L+5] (pre-pit 4 laps, post-pit 5 laps)",
+        "stops": 330,
+        "excluded": 36
+      }
+    ],
+    "baseline_comparison": [
+      {
+        "model": "Delta = 0 (No Gain)",
+        "mae": 1.177,
+        "mae_ci": [
+          0.92,
+          1.421
+        ],
+        "bias": -1.035,
+        "bias_ci": [
+          -1.291,
+          -0.709
+        ],
+        "spearman": "n/a (constant)",
+        "diff_vs_global": [
+          0.239,
+          0.62
+        ],
+        "status": "Inferior"
+      },
+      {
+        "model": "Global Training Median",
+        "mae": 0.723,
+        "mae_ci": [
+          0.584,
+          0.91
+        ],
+        "bias": -0.104,
+        "bias_ci": [
+          -0.388,
+          0.257
+        ],
+        "spearman": "n/a (constant)",
+        "diff_vs_global": [
+          0.0,
+          0.0
+        ],
+        "status": "Benchmark"
+      },
+      {
+        "model": "Per-Pair Training Median",
+        "mae": 0.67,
+        "mae_ci": [
+          0.55,
+          0.83
+        ],
+        "bias": -0.068,
+        "bias_ci": [
+          -0.303,
+          0.219
+        ],
+        "spearman": "n/a (constant)",
+        "diff_vs_global": [
+          -0.118,
+          0.007
+        ],
+        "status": "Indistinguishable from Global"
+      },
+      {
+        "model": "Old-Tyre Age Predictor",
+        "mae": 0.743,
+        "mae_ci": [
+          0.606,
+          0.936
+        ],
+        "bias": -0.035,
+        "bias_ci": [
+          -0.329,
+          0.343
+        ],
+        "spearman": "-0.637",
+        "diff_vs_global": [
+          -0.004,
+          0.057
+        ],
+        "status": "Indistinguishable from Global"
+      },
+      {
+        "model": "Corrected S1a Model",
+        "mae": 0.826,
+        "mae_ci": [
+          0.653,
+          1.051
+        ],
+        "bias": -0.298,
+        "bias_ci": [
+          -0.64,
+          0.152
+        ],
+        "spearman": "0.144",
+        "diff_vs_global": [
+          0.006,
+          0.188
+        ],
+        "status": "Inferior"
+      }
+    ],
+    "spearman_reconciliation": "Previous negative rank correlation was caused by opposite sign conventions in backtest vs target delta."
+  },
+  "decision_engine": {
+    "hit_rates": {
+      "engine_hit_rate": 1.0,
+      "engine_ci": [
+        1.0,
+        1.0
+      ],
+      "circuit_median_hit_rate": 0.372,
+      "circuit_median_ci": [
+        0.271,
+        0.468
+      ],
+      "fixed_heuristic_hit_rate": 0.136,
+      "fixed_heuristic_ci": [
+        0.091,
+        0.191
+      ]
+    },
+    "positioning": "Engine shipped as transparent what-if strategy calculator with sensitivity analysis."
+  },
+  "undercut_analysis": {
+    "total_cases": 80,
+    "positive_cases": 26,
+    "base_rate": 0.325,
+    "wilson_ci": [
+      0.232,
+      0.434
+    ]
+  },
+  "position_metric": {
+    "all_pairs_accuracy": 0.871,
+    "all_pairs_ci": [
+      0.832,
+      0.898
+    ],
+    "close_pairs_accuracy": 0.745,
+    "close_pairs_ci": [
+      0.712,
+      0.785
+    ],
+    "teammate_pairs_accuracy": 0.862,
+    "teammate_pairs_ci": [
+      0.71,
+      0.976
+    ]
+  }
+}

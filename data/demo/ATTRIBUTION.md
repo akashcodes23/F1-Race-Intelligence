@@ -1,13 +1,27 @@
-# F1 Race Intelligence — Offline Demo Dataset Attribution
+# F1 Race Intelligence — Offline Demo Dataset Attribution & Terms
 
 ## Data Source & Attribution Note
 
-This directory contains offline fallback timing data (`demo_laps.parquet`, 0.79 MB) covering **12,012 cleaned race laps** across **13 Grand Prix events** (2021–2023) to enable full application functionality offline, with empty cache directories, and independent of upstream live telemetry feeds.
+This directory contains offline fallback timing data (`demo_laps.parquet`, 6.2 MB) covering **12,012 cleaned race laps** across **13 Grand Prix events** (2021–2023) to enable full application functionality offline, with empty cache directories, and independent of upstream live telemetry feeds.
 
 ### Data Origin & Sources
 1. **Formula 1 Timing Data:** Sourced via the open-source [FastF1](https://github.com/theOehrly/Fast-F1) Python library, which interfaces with Formula 1 live timing and archive feeds.
 2. **Historical Timing Archive:** Ergast Developer API (historical driver, constructor, and results data).
 3. **Usage & Disclaimer:** Formula 1, F1, and related marks are trademarks of Formula One Licensing B.V. This project is a non-commercial, open-source educational and research analytics platform. It is not associated with, sponsored by, or affiliated with Formula 1, the FIA, or any Formula 1 team.
+
+### Legal Notice on Redistribution of Derived Timing Data
+> [!IMPORTANT]
+> **Redistribution Notice:** Redistributing derived Formula 1 timing and telemetry data may be restricted by the upstream provider's terms of service (Formula One Licensing B.V. / Formula One Management and FastF1 license terms).
+> 
+> To comply with terms and maintain a minimal repository footprint:
+> - The demo dataset is kept strictly minimal (~6.2 MB compressed parquet containing only essential timing channels without high-frequency raw telemetry arrays or GPS coordinates).
+> - Users and downstream developers can rebuild or regenerate the demo dataset directly from authorized FastF1 caches using the provided rebuild script.
+
+### Rebuilding the Demo Dataset
+To rebuild or update `data/demo/demo_laps.parquet` locally from your own FastF1 cache:
+```bash
+PYTHONPATH=. python scripts/export_demo_dataset.py --output data/demo/demo_laps.parquet
+```
 
 ### Included Grand Prix Events (13 Races)
 - **2021 Season:**
