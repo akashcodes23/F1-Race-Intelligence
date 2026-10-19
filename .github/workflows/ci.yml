@@ -1,8 +1,8 @@
-name: CI Pipeline
+nname: CI Pipeline
 
 on:
   push:
-    branches: [ main, feat/* ]
+    branches: [ main, feat/*, phase-* ]
   pull_request:
     branches: [ main ]
 
@@ -35,3 +35,7 @@ jobs:
       - name: Run Test Suite with Pytest
         run: |
           pytest tests/
+
+      - name: Verify Full Offline Rendering (13 Demo Races)
+        run: |
+          python scripts/verify_offline_app_render.py

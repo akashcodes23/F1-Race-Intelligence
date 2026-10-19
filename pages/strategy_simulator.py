@@ -17,8 +17,11 @@ from src.visualization import (
 
 
 def render_strategy_simulator(laps: pd.DataFrame, default_driver: str = "VER"):
-    st.markdown("### ⏱️ Pit Wall Strategy Simulator")
-    st.markdown("Model race-distance scenarios, calculate mathematically optimal pit windows, and run sensitivity checks against pit loss.")
+    st.markdown("### ⏱️ Pit Wall Strategy Simulator [SIMULATED]")
+    st.markdown(
+        "Model deterministic what-if race scenarios, evaluate candidate pit laps across a projected horizon, "
+        "and inspect sensitivity to pit loss and tyre wear under explicit user assumptions."
+    )
 
     # Parameters
     col1, col2, col3 = st.columns(3)
@@ -51,12 +54,12 @@ def render_strategy_simulator(laps: pd.DataFrame, default_driver: str = "VER"):
     st.markdown("---")
     sc1, sc2, sc3 = st.columns(3)
     with sc1:
-        st.metric("Total Projected Time (Stay Out)", f"{sim_res['total_stay_time']:.1f}s")
+        st.metric("Total Projected Time (Stay Out) [SIMULATED]", f"{sim_res['total_stay_time']:.1f}s")
     with sc2:
-        st.metric(f"Total Projected Time (Pit Lap {pit_lap})", f"{sim_res['total_pit_time']:.1f}s")
+        st.metric(f"Total Projected Time (Pit Lap {pit_lap}) [SIMULATED]", f"{sim_res['total_pit_time']:.1f}s")
     with sc3:
         adv = sim_res["net_advantage"]
-        st.metric("Net Advantage / Time Saved", f"{adv:+.2f}s", delta=sim_res["optimal_strategy"])
+        st.metric("Net Advantage / Time Saved [SIMULATED]", f"{adv:+.2f}s", delta=sim_res["optimal_strategy"])
 
     # Strategy Horizon Plot
     fig_sim = strategy_horizon_plot(sim_res["laps"], int(pit_lap))
@@ -64,8 +67,11 @@ def render_strategy_simulator(laps: pd.DataFrame, default_driver: str = "VER"):
 
     # ── Pit Window Optimizer ──
     st.markdown("---")
-    st.markdown("#### 🎯 Mathematical Pit Window Optimization")
-    st.caption("Evaluates every candidate pit lap within a ±6 lap window around current lap.")
+    st.markdown("#### 🎯 Candidate Pit Window Evaluation [SIMULATED]")
+    st.caption(
+        "Deterministic scenario sweep evaluating candidate pit laps within a ±6 lap horizon around current lap. "
+        "Assumes linear degradation and constant pit-loss penalty."
+    )
 
     start_cand = max(int(current_lap), 2)
     end_cand = min(int(total_laps) - 2, int(current_lap) + 12)

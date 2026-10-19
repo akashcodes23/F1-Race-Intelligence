@@ -215,3 +215,197 @@ def compare_driver_sectors(
     ]
 
     return pd.DataFrame(comparison_rows), sectors_summary
+
+
+def compute_leader_gap_proxy(
+    laps: pd.DataFrame,
+    current_lap: int,
+    reference_lap_time: float = 90.0,
+) -> pd.DataFrame:
+    """
+    Computes deterministic lap elapsed timing proxy relative to the race leader at current_lap.
+
+    Scientific & Timing Distinction:
+    - This calculates the cumulative elapsed lap timing proxy across completed laps (Lap 1..current_lap).
+    - It is NOT the official Formula 1 live telemetry timing-tower gap (which measures spatial transponder deltas
+      at the instant the leader crosses a sector line).
+    - For drivers on the lead lap who completed current_lap, gap is:
+        delta_sec = driver_cumulative_time - leader_cumulative_time
+    - For lapped drivers (completed_laps < current_lap), official timing displays lap deficit:
+        gap_display = '+1 LAP' or '+N LAPS'
+    - For cars with missing/invalid lap times or non-positive records:
+        status is 'INCOMPLETE_DATA' and gap is labeled 'N/A'.
+    - For drivers with no records up to current_lap:
+        status is 'OUT'.
+
+    Returns:
+        pd.DataFrame sorted by track position with columns:
+        ['driver', 'position', 'team', 'compound', 'tyre_life', 'completed_laps',
+         'cum_time', 'gap_to_lead_s', 'gap_display', 'status', 'is_lapped', 'metric_type']
+    """
+    if laps is None or laps.empty:
+        return pd.DataFrame()
+
+    ref_time = max(40.0, float(reference_lap_time))
+    all_drivers = sorted(laps["Driver"].dropna().unique().tolist())
+    records = []
+
+    # Filter laps up to current_lap
+    up_to_cur = laps[laps["LapNumber"] <= current_lap].copy()
+    if "LapTimeSec" not in up_to_cur.columns and "LapTime" in up_to_cur.columns:
+        up_to_cur["LapTimeSec"] = up_to_cur["LapTime"].dt.total_seconds()
+
+    for drv in all_drivers:
+        d_laps = up_to_cur[up_to_cur["Driver"] == drv]
+        if d_laps.empty:
+            records.append({
+                "driver": drv,
+                "position": 99,
+                "team": "Unknown",
+                "compound": "UNKNOWN",
+                "tyre_life": 0,
+                "completed_laps": 0,
+                "cum_time": 0.0,
+                "gap_to_lead_s": None,
+                "gap_display": "OUT",
+                "status": "OUT",
+                "is_lapped": False,
+                "metric_type": "UNAVAILABLE",
+            })
+            continue
+
+        last_lap = d_laps.iloc[-1]
+        pos = int(last_lap.get("Position", 99)) if pd.notna(last_lap.get("Position")) else 99
+        team = str(last_lap.get("Team", "Unknown"))
+        compound = str(last_lap.get("Compound", "MEDIUM"))
+        completed_laps = int(d_laps["LapNumber"].max())
+        tyre_life = int(last_lap.get("TyreLife", completed_laps)) if pd.notna(last_lap.get("TyreLife")) else completed_laps
+
+        # Validate lap times
+        valid_times = d_laps["LapTimeSec"].dropna()
+        valid_times = valid_times[valid_times > 0]
+
+        has_missing = len(valid_times) < len(d_laps)
+        cum_time = float(valid_times.sum()) if not valid_times.empty else 0.0
+
+        records.append({
+            "driver": drv,
+            "position": pos,
+            "team": team,
+            "compound": compound,
+            "tyre_life": tyre_life,
+            "completed_laps": completed_laps,
+            "cum_time": cum_time,
+            "has_missing": has_missing,
+        })
+
+    # Sort records by completed laps (most laps first), then track position, then cumulative time
+    records.sort(key=lambda r: (-r.get("completed_laps", 0), r.get("position", 99), r.get("cum_time", 0.0)))
+
+    if not records:
+        return pd.DataFrame()
+
+    # Identify leader
+    leader = records[0]
+    leader_cum_time = leader["cum_time"]
+    leader_laps = leader["completed_laps"]
+
+    results = []
+    for idx, r in enumerate(records):
+        drv = r["driver"]
+        pos = r["position"]
+        comp_laps = r["completed_laps"]
+        cum_t = r["cum_time"]
+        has_miss = r.get("has_missing", False)
+
+        if idx == 0:
+            results.append({
+                "driver": drv,
+                "position": pos,
+                "team": r["team"],
+                "compound": r["compound"],
+                "tyre_life": r["tyre_life"],
+                "completed_laps": comp_laps,
+                "cum_time": cum_t,
+                "gap_to_lead_s": 0.0,
+                "gap_display": "LEADER",
+                "status": "LEADER",
+                "is_lapped": False,
+                "metric_type": "LEADER",
+            })
+            continue
+
+        if comp_laps == 0 or cum_t <= 0.0:
+            results.append({
+                "driver": drv,
+                "position": pos,
+                "team": r["team"],
+                "compound": r["compound"],
+                "tyre_life": r["tyre_life"],
+                "completed_laps": comp_laps,
+                "cum_time": cum_t,
+                "gap_to_lead_s": None,
+                "gap_display": "OUT",
+                "status": "OUT",
+                "is_lapped": False,
+                "metric_type": "UNAVAILABLE",
+            })
+            continue
+
+        if has_miss:
+            results.append({
+                "driver": drv,
+                "position": pos,
+                "team": r["team"],
+                "compound": r["compound"],
+                "tyre_life": r["tyre_life"],
+                "completed_laps": comp_laps,
+                "cum_time": cum_t,
+                "gap_to_lead_s": None,
+                "gap_display": "N/A",
+                "status": "INCOMPLETE_DATA",
+                "is_lapped": False,
+                "metric_type": "INCOMPLETE_DATA",
+            })
+            continue
+
+        # Check for lapped car
+        if comp_laps < leader_laps:
+            lap_deficit = leader_laps - comp_laps
+            gap_disp = f"+{lap_deficit} LAP" if lap_deficit == 1 else f"+{lap_deficit} LAPS"
+            # Spatial proxy gap for 3D track ribbon calculation
+            spatial_proxy = round(lap_deficit * ref_time + max(0.0, cum_t - (leader_cum_time * (comp_laps / max(1, leader_laps)))), 2)
+            results.append({
+                "driver": drv,
+                "position": pos,
+                "team": r["team"],
+                "compound": r["compound"],
+                "tyre_life": r["tyre_life"],
+                "completed_laps": comp_laps,
+                "cum_time": cum_t,
+                "gap_to_lead_s": spatial_proxy,
+                "gap_display": gap_disp,
+                "status": "LAPPED",
+                "is_lapped": True,
+                "metric_type": "LAP_DEFICIT",
+            })
+        else:
+            # On lead lap with identical completed laps
+            delta_sec = round(max(0.0, cum_t - leader_cum_time), 2)
+            results.append({
+                "driver": drv,
+                "position": pos,
+                "team": r["team"],
+                "compound": r["compound"],
+                "tyre_life": r["tyre_life"],
+                "completed_laps": comp_laps,
+                "cum_time": cum_t,
+                "gap_to_lead_s": delta_sec,
+                "gap_display": f"+{delta_sec:.2f}s",
+                "status": "ON_LEAD_LAP",
+                "is_lapped": False,
+                "metric_type": "CUMULATIVE_ELAPSED_PROXY",
+            })
+
+    return pd.DataFrame(results)
+
