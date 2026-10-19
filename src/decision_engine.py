@@ -55,16 +55,32 @@ ASSUMED_SC_DISCOUNT_SEC = 9.50
 
 
 @dataclass
+class PitWindowOption:
+    pit_lap: int
+    expected_net_gain_sec: float
+    ci_80_lower: float
+    ci_80_upper: float
+    break_even_laps: float
+    is_legal: bool
+    verdict: str  # 'PIT NOW', 'STAY OUT', or 'INCONCLUSIVE'
+
+
+@dataclass
 class DecisionOutput:
     verdict: str  # 'PIT NOW', 'STAY OUT', or 'INCONCLUSIVE'
     prob_pit_beats_stay: float
     expected_net_gain_sec: float
     ci_80_lower: float
     ci_80_upper: float
+    break_even_laps: float
     best_pit_window_lap: int
     prob_best_window: float
+    pit_window_options: List[PitWindowOption]
+    is_legal_strategy: bool
+    rule_disclaimer: str
     sensitivity: Dict[str, Any]
     reasons: List[str]
+
 
 
 def compute_stay_out_anchor(recent_laps: pd.DataFrame, fuel_effect: float = DEFAULT_FUEL_EFFECT_SEC_PER_LAP) -> float:
@@ -175,6 +191,8 @@ def run_monte_carlo_decision(
     seed: int = 42,
     fixed_pit_loss: Optional[float] = None,
     candidate_window_radius: int = 5,
+    used_compounds: Optional[List[str]] = None,
+    is_wet_race: bool = False,
 ) -> DecisionOutput:
     """
     1,000-run Monte Carlo decision engine sampling:
@@ -182,6 +200,7 @@ def run_monte_carlo_decision(
     - trend scenarios (flat vs shrunk empirical),
     - circuit pit loss distributions,
     - safety car occurrence.
+    Also validates FIA dry-race two-compound rule (Reg 30.5) and computes break-even laps.
     """
     np.random.seed(seed)
 
@@ -193,8 +212,12 @@ def run_monte_carlo_decision(
             expected_net_gain_sec=0.0,
             ci_80_lower=0.0,
             ci_80_upper=0.0,
+            break_even_laps=0.0,
             best_pit_window_lap=current_lap,
             prob_best_window=1.0,
+            pit_window_options=[],
+            is_legal_strategy=True,
+            rule_disclaimer="Race completed.",
             sensitivity={},
             reasons=["Race is already completed."],
         )
@@ -209,6 +232,38 @@ def run_monte_carlo_decision(
     # 3. Circuit Pit Loss
     c_info = CIRCUIT_PIT_LOSSES.get(circuit_name, DEFAULT_CIRCUIT_PIT_LOSS)
     sc_prob = CIRCUIT_SC_PROB_PER_LAP.get(circuit_name, DEFAULT_SC_PROB_PER_LAP)
+    median_pit_loss = c_info["median"] if fixed_pit_loss is None else fixed_pit_loss
+
+    # 4. Break-even laps = Pit Loss / Expected Per-Lap Gain
+    per_lap_gain_mag = max(abs(base_pace_gain), 0.05)
+    break_even_laps = round(median_pit_loss / per_lap_gain_mag, 1)
+
+    # 5. FIA Sporting Reg 30.5: Dry Race Two Different Compounds Requirement
+    # In a dry race, each driver must use at least two different dry compound specifications.
+    if used_compounds is not None:
+        comp_history = [c.upper() for c in used_compounds]
+        has_wet_tyres = any(c in {"INTERMEDIATE", "WET"} for c in comp_history) or is_wet_race
+        will_use_two = (len(set(comp_history)) >= 2) or (new_compound.upper() not in comp_history)
+        if not has_wet_tyres and not will_use_two:
+            is_legal_strategy = False
+            rule_disclaimer = (
+                "ILLEGAL STRATEGY WARNING (FIA Sporting Reg 30.5): In a dry race, each driver must "
+                f"use at least two different dry compound specifications. Staying on '{current_compound.upper()}' "
+                "without switching to another dry compound violates regulations unless rain occurs."
+            )
+        else:
+            is_legal_strategy = True
+            rule_disclaimer = (
+                "LEGAL STRATEGY: Meets FIA Sporting Reg 30.5 compound specification requirement."
+                if not has_wet_tyres
+                else "LEGAL STRATEGY (Wet Exception): Mandatory two-compound dry rule waived due to wet/intermediate conditions."
+            )
+    else:
+        is_legal_strategy = True
+        rule_disclaimer = (
+            "COMPOUND STATUS UNCONSTRAINED: Prior stint compound history is unobserved; "
+            "verifying FIA Reg 30.5 requires full-race stint history."
+        )
 
     # Simulate Pit Now vs Stay Out
     net_gains_pit_now = []
@@ -238,9 +293,7 @@ def run_monte_carlo_decision(
         stay_times = anchor + trend_val * laps_steps
 
         # Pit now: pay pit loss, then run at (anchor + sim_gain) evolving with new compound deg
-        # New tyre degradation rate
         new_deg_rate = 0.0484 if new_compound.upper() == "MEDIUM" else (0.1310 if new_compound.upper() == "SOFT" else 0.0217)
-        # Fuel burn pace gain along horizon
         fuel_gain_steps = -DEFAULT_FUEL_EFFECT_SEC_PER_LAP * laps_steps
         pit_times = (anchor + sim_gain) + (new_deg_rate * laps_steps) + fuel_gain_steps
 
@@ -257,28 +310,57 @@ def run_monte_carlo_decision(
     ci_80_low = float(np.percentile(net_gains_pit_now, 10.0))
     ci_80_high = float(np.percentile(net_gains_pit_now, 90.0))
 
-    # Evaluate best pit window
+    # Evaluate candidate pit window [current_lap, current_lap + candidate_window_radius]
     cand_laps = list(range(
         max(current_lap, 1),
         min(total_race_laps - 1, current_lap + candidate_window_radius + 1)
     ))
+    pit_window_options: List[PitWindowOption] = []
     window_scores = {}
+
     for cand in cand_laps:
         delay = cand - current_lap
-        # Delaying stop delays pit loss and stays on old tyres for `delay` laps
+        # Delaying stop keeps old tyres for `delay` laps
         cand_gain = expected_gain - (delay * (shrunk_tr - base_pace_gain * 0.15))
+        cand_ci_low = ci_80_low - (delay * 0.20)
+        cand_ci_high = ci_80_high - (delay * 0.20)
+
+        if cand_ci_low <= 0.0 <= cand_ci_high:
+            opt_verdict = "INCONCLUSIVE"
+        elif cand_ci_low > 0.0:
+            opt_verdict = "PIT NOW"
+        else:
+            opt_verdict = "STAY OUT"
+
+        pit_window_options.append(PitWindowOption(
+            pit_lap=cand,
+            expected_net_gain_sec=round(float(cand_gain), 2),
+            ci_80_lower=round(float(cand_ci_low), 2),
+            ci_80_upper=round(float(cand_ci_high), 2),
+            break_even_laps=break_even_laps,
+            is_legal=is_legal_strategy,
+            verdict=opt_verdict,
+        ))
         window_scores[cand] = cand_gain
 
-    best_lap = max(window_scores, key=window_scores.get)
+    best_lap = max(window_scores, key=window_scores.get) if window_scores else current_lap
     prob_best = float(min(0.95, max(0.40, prob_pit if best_lap == current_lap else 1.0 - prob_pit)))
 
     # Strict Decision Rule:
     # If 80% CI includes zero, verdict must be INCONCLUSIVE!
-    if ci_80_low <= 0.0 <= ci_80_high:
+    if not is_legal_strategy:
+        verdict = "PIT NOW"
+        reasons = [
+            rule_disclaimer,
+            f"Must pit to change compound specification from {current_compound.upper()} to {new_compound.upper()}.",
+            f"Break-even threshold: {break_even_laps} laps required to offset {median_pit_loss:.1f}s pit loss.",
+        ]
+    elif ci_80_low <= 0.0 <= ci_80_high:
         verdict = "INCONCLUSIVE"
         reasons = [
             f"80% confidence interval [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] includes zero; statistical uncertainty prevents a definitive call.",
             f"Expected net gain is {expected_gain:+.2f}s with pit win probability of {prob_pit:.1%}.",
+            f"Break-even distance: {break_even_laps} laps on fresh {new_compound} required to offset {median_pit_loss:.1f}s pit loss.",
             "Monitor lap times for the next 2 laps to observe if tyre degradation accelerates.",
         ]
     elif ci_80_low > 0.0:
@@ -286,6 +368,7 @@ def run_monte_carlo_decision(
         reasons = [
             f"80% confidence interval [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] is strictly positive.",
             f"Expected race time saving of {expected_gain:.2f}s (Win Probability: {prob_pit:.1%}).",
+            f"Break-even distance: {break_even_laps} laps (Horizon: {horizon} laps remaining).",
             f"New {new_compound} provides estimated {abs(base_pace_gain):.2f}s/lap delta vs degrading {current_compound}.",
         ]
     else:
@@ -293,7 +376,8 @@ def run_monte_carlo_decision(
         reasons = [
             f"80% confidence interval [{ci_80_low:+.2f}s, {ci_80_high:+.2f}s] is strictly negative.",
             f"Pitting now incurs an expected net time loss of {abs(expected_gain):.2f}s.",
-            f"Current tyre pace remaining does not warrant paying the {c_info['median']:.1f}s pit stop penalty.",
+            f"Break-even distance of {break_even_laps} laps exceeds viable horizon given {median_pit_loss:.1f}s pit stop loss.",
+            f"Current tyre pace remaining does not warrant paying the {median_pit_loss:.1f}s pit stop penalty.",
         ]
 
     # Sensitivity Analysis
@@ -312,11 +396,16 @@ def run_monte_carlo_decision(
         expected_net_gain_sec=round(expected_gain, 2),
         ci_80_lower=round(ci_80_low, 2),
         ci_80_upper=round(ci_80_high, 2),
+        break_even_laps=break_even_laps,
         best_pit_window_lap=best_lap,
         prob_best_window=round(prob_best, 3),
+        pit_window_options=pit_window_options,
+        is_legal_strategy=is_legal_strategy,
+        rule_disclaimer=rule_disclaimer,
         sensitivity=sensitivity,
         reasons=reasons,
     )
+
 
 
 def evaluate_undercut_overcut(

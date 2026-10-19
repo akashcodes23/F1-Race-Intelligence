@@ -161,7 +161,56 @@ class TestDecisionEngine(unittest.TestCase):
         self.assertLess(res_far["expected_margin_sec"], -10.0)
         self.assertIsNone(res_far["prob_success"])
 
+    def test_dry_race_two_compound_rule(self):
+        # In a dry race, staying on the same single compound violates FIA Reg 30.5
+        res_illegal = run_monte_carlo_decision(
+            current_lap=20,
+            total_race_laps=50,
+            recent_laps=self.synthetic_laps,
+            current_compound="HARD",
+            new_compound="HARD",
+            current_tyre_age=10,
+            used_compounds=["HARD"],
+            is_wet_race=False,
+            seed=42,
+        )
+        self.assertFalse(res_illegal.is_legal_strategy)
+        self.assertEqual(res_illegal.verdict, "PIT NOW")
+        self.assertIn("FIA Sporting Reg 30.5", res_illegal.rule_disclaimer)
+
+        # Wet race exception waives the requirement
+        res_wet = run_monte_carlo_decision(
+            current_lap=20,
+            total_race_laps=50,
+            recent_laps=self.synthetic_laps,
+            current_compound="HARD",
+            new_compound="HARD",
+            current_tyre_age=10,
+            used_compounds=["HARD"],
+            is_wet_race=True,
+            seed=42,
+        )
+        self.assertTrue(res_wet.is_legal_strategy)
+        self.assertIn("Wet Exception", res_wet.rule_disclaimer)
+
+    def test_break_even_laps_and_pit_window(self):
+        res = run_monte_carlo_decision(
+            current_lap=20,
+            total_race_laps=50,
+            recent_laps=self.synthetic_laps,
+            current_compound="MEDIUM",
+            new_compound="HARD",
+            current_tyre_age=15,
+            candidate_window_radius=3,
+            seed=42,
+        )
+        self.assertGreater(res.break_even_laps, 10.0)
+        self.assertEqual(len(res.pit_window_options), 4)  # laps 20, 21, 22, 23
+        for opt in res.pit_window_options:
+            self.assertIn(opt.verdict, ["PIT NOW", "STAY OUT", "INCONCLUSIVE"])
+            self.assertGreaterEqual(opt.pit_lap, 20)
 
 
 if __name__ == "__main__":
     unittest.main()
+

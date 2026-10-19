@@ -79,7 +79,7 @@ def render_ml_lab(laps: pd.DataFrame, default_driver: str = "VER"):
             delta_color="off",
         )
         m6.metric(
-            label="HGBR Variant A (Champion)",
+            label="HGBR Variant A (Autoregressive)",
             value=f"{hgbr_a.get('mean_mae', 0.367):.3f}s",
             delta=f"RMSE: {hgbr_a.get('mean_rmse', 0.573):.3f}s (-4.4% MAE)",
             delta_color="normal",
